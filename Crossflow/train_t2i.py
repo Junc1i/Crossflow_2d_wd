@@ -45,6 +45,7 @@ from libs.clip import FrozenCLIPEmbedder
 from diffusion.flow_matching import FlowMatching, ODEFlowMatchingSolver, ODEEulerFlowMatchingSolver
 from tools.fid_score import calculate_fid_given_paths
 from tools.clip_score import ClipSocre
+import webdataset as wds
 
 original_sys_path = sys.path.copy()
 crossflow_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,22 +91,26 @@ def train(config):
         builtins.print = lambda *args: None
     logging.info(f'Run on {accelerator.num_processes} devices')
 
-    # 传递 fid_stat_path 到 dataset（如果配置中有）
+    # 定义 num_workers（可以从配置中读取，或使用默认值）
+    gpu_model = torch.cuda.get_device_name(torch.cuda.current_device())
+    num_workers = 40
+    
+    # 传递参数到 dataset（包括 fid_stat_path, num_workers, batch_size）
     dataset_kwargs = dict(config.dataset)
     if hasattr(config, 'fid_stat_path') and config.fid_stat_path:
         dataset_kwargs['fid_stat_path'] = config.fid_stat_path
+    
+    # 传递 num_workers 和 batch_size 给数据集
+    dataset_kwargs['num_workers'] = num_workers
+    dataset_kwargs['batch_size'] = mini_batch_size  # 每个进程的 batch_size
     dataset = get_dataset(**dataset_kwargs)
-
-    gpu_model = torch.cuda.get_device_name(torch.cuda.current_device())
-    num_workers = 40
 
     # 提前加载模型，以便在创建 DataLoader 之前设置 processor
     model_path = "deepseek-ai/Janus-Pro-1B"
     vl_chat_processor: VLChatProcessor = VLChatProcessor.from_pretrained(model_path)
 
     # 预编码tokenizer（优化：避免在训练循环中重复执行tokenizer.encode）
-    # 因为所有样本使用相同的question="",可以提前编码并缓存
-    training_question = ""  # 训练时使用的question
+    training_question = ""
     sft_format = vl_chat_processor.apply_sft_template_for_multi_turn_prompts(
         conversations=[
             {"role": "<|User|>", "content": f"<image_placeholder>\n{training_question}"},
@@ -116,7 +121,7 @@ def train(config):
     )
     # 预编码input_ids（CPU上，仅执行一次）
     cached_training_input_ids = vl_chat_processor.tokenizer.encode(sft_format)
-    logging.info(f'预编码tokenizer完成，input_ids长度: {len(cached_training_input_ids)}')
+    logging.info(f'预编码tokenizer完成, input_ids长度: {len(cached_training_input_ids)}')
 
     train_dataset = dataset.get_split(split='train', labeled=True)
     
@@ -124,23 +129,22 @@ def train(config):
     from datasets import WebDatasetDataset
     is_webdataset = isinstance(train_dataset, WebDatasetDataset)
     
-    # 如果使用 WebDataset，在创建 DataLoader 之前设置 vl_chat_processor 和 device
+    # 如果使用 WebDataset，在创建 DataLoader 之前设置 vl_chat_processor
     if is_webdataset:
         train_dataset.set_vl_chat_processor(vl_chat_processor)
         train_dataset.set_device(device)  # 使用 accelerator.device
     
-    # WebDataset 需要使用不同的 DataLoader 配置
+    # WebDataset 需要使用 wds.WebLoader
     if is_webdataset:
-        train_dataset_loader = DataLoader(
-            train_dataset, 
-            batch_size=mini_batch_size, 
+        train_dataset_loader = wds.WebLoader(
+            train_dataset,
+            batch_size=None,  # batch_size 已经在 pipeline 中通过 wds.batched() 处理
             shuffle=False,  # WebDataset 已经在 pipeline 中 shuffle
-            drop_last=True,
             num_workers=num_workers,  # 可以使用多个 worker 加速数据加载
-            pin_memory=True,
+            pin_memory=True,  # 使用 pin_memory 加速 CPU 到 GPU 的传输
             persistent_workers=True if num_workers > 0 else False,  # num_workers > 0 时可以使用 persistent_workers
-            prefetch_factor=4,
         )
+        # wds.WebLoader 不支持 drop_last，因为批处理已经在 pipeline 中完成
     else:
         # 传统 Dataset 模式
         train_dataset_loader = DataLoader(
@@ -157,19 +161,18 @@ def train(config):
     test_dataset = dataset.get_split(split='test', labeled=True)  # for sampling
     is_test_webdataset = isinstance(test_dataset, WebDatasetDataset)
     
-    # 如果使用 WebDataset，在创建 DataLoader 之前设置 vl_chat_processor 和 device
+    # 如果使用 WebDataset，在创建 DataLoader 之前设置 vl_chat_processor
     if is_test_webdataset:
         test_dataset.set_vl_chat_processor(vl_chat_processor)
         test_dataset.set_device(device)  # 使用 accelerator.device
     
     if is_test_webdataset:
-        test_dataset_loader = DataLoader(
+        test_dataset_loader = wds.WebLoader(
             test_dataset,
-            batch_size=config.sample.mini_batch_size,
+            batch_size=None,  # batch_size 已经在 pipeline 中通过 wds.batched() 处理
             shuffle=False,
-            drop_last=True,
             num_workers=num_workers,  # 可以使用多个 worker 加速数据加载
-            pin_memory=True,
+            pin_memory=True,  # 使用 pin_memory 加速 CPU 到 GPU 的传输（数据在 CPU 上）
             persistent_workers=True if num_workers > 0 else False,  # num_workers > 0 时可以使用 persistent_workers
         )
     else:
@@ -604,7 +607,7 @@ def main(argv):
     config = FLAGS.config
     config.config_name = get_config_name()
     config.hparams = get_hparams()
-
+    
     # 设置 workdir
     if FLAGS.workdir:
         # 如果直接提供了 workdir，直接使用
