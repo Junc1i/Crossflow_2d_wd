@@ -29,6 +29,15 @@ def log_and_continue(exn):
     """Call in an exception handler to ignore any exception, issue a warning, and continue."""
     if "No images in sample" in str(exn) or "Only one image in sample" in str(exn):
         return True
+    
+    # 如果是 FileNotFoundError，显示更详细的信息
+    if isinstance(exn, FileNotFoundError) or "FileNotFoundError" in str(type(exn)):
+        # 只在第一个进程打印详细错误，避免日志过多
+        import os
+        if os.environ.get("RANK", "0") == "0":
+            logging.warning(f"Handling webdataset FileNotFoundError: {exn}. Ignoring and continuing.")
+        return True
+    
     logging.warning(f"Handling webdataset error ({repr(exn)}). Ignoring.")
     return True
 
@@ -146,7 +155,16 @@ def get_dataset_size(shards, estimated_sample_per_shard=1000):
     估算数据集大小(用于 __len__)
     根据 shard 数量估算
     """
-    shards_list = list(braceexpand.braceexpand(shards))
+    # 支持逗号分隔的多个路径模式：分别展开再合并
+    if ',' in shards:
+        shards_list = []
+        for pattern in shards.split(','):
+            pattern = pattern.strip()  # 去除空格
+            if not pattern:
+                continue
+            shards_list.extend(list(braceexpand.braceexpand(pattern)))
+    else:
+        shards_list = list(braceexpand.braceexpand(shards))
     num_shards = len(shards_list)
     
     # # 尝试从 num_samples.json 读取
@@ -663,6 +681,46 @@ def nodesplitter_identity(urls):
     return urls
 
 
+def handle_reconstruction_task(sample, handler=log_and_continue):
+    """处理重建任务：如果只有 in 图片没有 out 图片，则使用 in 作为 out
+    
+    支持 .png 和 .jpg 两种格式。
+    这个函数会在 wds.decode("pil") 之后、wds.to_tuple() 之前执行。
+    此时 sample 是一个字典，包含解码后的 PIL Image。
+    
+    这个函数必须定义在模块级别（类外部），以便在 spawn 模式下可以被 pickle。
+    
+    Args:
+        sample: webdataset 样本字典，包含解码后的图像
+        handler: 错误处理函数（为了兼容 webdataset 的 map 函数接口）
+    
+    Returns:
+        处理后的样本字典
+    """
+    # 检查是否有 input 图片（.png 或 .jpg）
+    in_key = None
+    if "in.png" in sample:
+        in_key = "in.png"
+    elif "in.jpg" in sample:
+        in_key = "in.jpg"
+    
+    # 检查是否有 output 图片
+    out_key = None
+    if "out.png" in sample:
+        out_key = "out.png"
+    elif "out.jpg" in sample:
+        out_key = "out.jpg"
+    
+    # 如果有 input 但没有 output，使用 input 作为 output（重建任务）
+    if in_key and not out_key:
+        if in_key == "in.png":
+            sample["out.png"] = sample["in.png"]
+        else:
+            sample["out.jpg"] = sample["in.jpg"]
+    
+    return sample
+
+
 class WebDatasetDataset(IterableDataset):
     """
     使用 webdataset 加载 input/output 图像对。
@@ -728,8 +786,16 @@ class WebDatasetDataset(IterableDataset):
             else:
                 self.device = device
         
-        # 展开 URL 列表
-        all_urls = list(braceexpand.braceexpand(tar_pattern))
+        # 展开 URL 列表（支持逗号分隔的多个路径模式）
+        if ',' in tar_pattern:
+            all_urls = []
+            for pattern in tar_pattern.split(','):
+                pattern = pattern.strip()  # 去除空格
+                if not pattern:
+                    continue
+                all_urls.extend(list(braceexpand.braceexpand(pattern)))
+        else:
+            all_urls = list(braceexpand.braceexpand(tar_pattern))
         
         # 注意:如果使用 resampled=True,webdataset 需要显式添加 nodesplitter
         # 为了满足这个要求,我们有两种策略:
@@ -825,7 +891,8 @@ class WebDatasetDataset(IterableDataset):
         pipeline_stages.extend([
             wds.shuffle(shuffle_buffer, handler=handler),  # shuffle 样本
             wds.decode("pil", handler=handler),  # 解码为 PIL Image
-            wds.to_tuple("in.png", "out.png", handler=handler),  # 提取图像对
+            wds.map(handle_reconstruction_task, handler=handler),  # 处理重建任务（在 to_tuple 之前）
+            wds.to_tuple("in.png;in.jpg", "out.png;out.jpg", handler=handler),  # 提取图像对（同时支持 .png 和 .jpg）
             wds.map_tuple(
                 self._preprocess_input,
                 self._preprocess_output
@@ -1029,8 +1096,8 @@ class OnlineFeatures(DatasetFactory):
         else:
             raise ValueError("必须提供 train_image_root 或 train_tar_pattern 之一")
         
-        print(f'Dataset ready: train={len(self.train) if hasattr(self.train, "__len__") else "unknown"}, '
-              f'val={len(self.test) if hasattr(self.test, "__len__") else "unknown"}')
+        # print(f'Dataset ready: train={len(self.train) if hasattr(self.train, "__len__") else "unknown"}, '
+        #       f'val={len(self.test) if hasattr(self.test, "__len__") else "unknown"}')
         assert not cfg
         self.resolution = resolution
 

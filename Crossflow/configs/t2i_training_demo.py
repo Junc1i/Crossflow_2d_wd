@@ -130,7 +130,7 @@ def get_config():
         shuffle_buffer=300,
         resampled=True,
         split_data_by_node=True,
-        estimated_samples_per_shard=150,
+        estimated_samples_per_shard=600,
         
         cfg=False
     )
