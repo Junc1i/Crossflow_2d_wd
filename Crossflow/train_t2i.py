@@ -93,7 +93,7 @@ def train(config):
 
     # 定义 num_workers（可以从配置中读取，或使用默认值）
     gpu_model = torch.cuda.get_device_name(torch.cuda.current_device())
-    num_workers = 40
+    num_workers = getattr(config, 'num_workers', 8)
     
     # 传递参数到 dataset（包括 fid_stat_path, num_workers, batch_size）
     dataset_kwargs = dict(config.dataset)
@@ -283,6 +283,11 @@ def train(config):
         if isinstance(_batch_output_img, torch.Tensor) and _batch_output_img.device != device:
             _batch_output_img = _batch_output_img.to(device, non_blocking=True)
         
+        # 确保 batch_output_img 有正确的 batch 维度
+        # 当 mini_batch_size=1 时，wds.batched 可能返回 [C, H, W] 而不是 [1, C, H, W]
+        if isinstance(_batch_output_img, torch.Tensor) and _batch_output_img.dim() == 3:
+            _batch_output_img = _batch_output_img.unsqueeze(0)  # [C, H, W] -> [1, C, H, W]
+        
         moments_256 = autoencoder(_batch_output_img, fn='encode_moments')
         # moments_256 应该是 [batch_size, 8, H, W] 形状，需要保持batch维度
         moments_256 = moments_256.detach()  # 保持为 Tensor，不要转换为 numpy
@@ -397,6 +402,10 @@ def train(config):
                 # 确保 _output_img 在正确的设备上
                 if isinstance(_output_img, torch.Tensor) and _output_img.device != device:
                     _output_img = _output_img.to(device, non_blocking=True)
+                # 确保 _output_img 有正确的 batch 维度
+                # 当 batch_size=1 时，wds.batched 可能返回 [C, H, W] 而不是 [1, C, H, W]
+                if isinstance(_output_img, torch.Tensor) and _output_img.dim() == 3:
+                    _output_img = _output_img.unsqueeze(0)  # [C, H, W] -> [1, C, H, W]
                 # 返回生成的图片和对应的ground truth图片
                 return generated_samples, _output_img
         
@@ -588,6 +597,38 @@ flags.DEFINE_string("train_tar_pattern", None, "Training tar pattern for WebData
 flags.DEFINE_string("test_tar_pattern", None, "Test tar pattern for WebDataset.")
 flags.DEFINE_string("vis_image_root", None, "Path to visualization images root.")
 
+# Training parameters
+flags.DEFINE_integer("n_steps", None, "Total training iterations.")
+flags.DEFINE_integer("batch_size", None, "Overall batch size across ALL gpus.")
+flags.DEFINE_integer("log_interval", None, "Iteration interval for logging.")
+flags.DEFINE_integer("eval_interval", None, "Iteration interval for visual testing.")
+flags.DEFINE_integer("save_interval", None, "Iteration interval for saving checkpoints.")
+flags.DEFINE_integer("n_samples_eval", None, "Number of samples for evaluation.")
+
+# Dataset parameters
+flags.DEFINE_string("dataset_name", None, "Dataset name.")
+flags.DEFINE_string("task", None, "Task name.")
+flags.DEFINE_integer("resolution", None, "Dataset resolution.")
+flags.DEFINE_integer("shuffle_buffer", None, "Shuffle buffer size for WebDataset.")
+flags.DEFINE_boolean("resampled", None, "Whether to resample WebDataset.")
+flags.DEFINE_boolean("split_data_by_node", None, "Whether to split data by node.")
+flags.DEFINE_integer("estimated_samples_per_shard", None, "Estimated samples per shard.")
+
+# Sample parameters
+flags.DEFINE_integer("sample_steps", None, "Sample steps during inference/testing.")
+flags.DEFINE_integer("n_samples", None, "Number of samples for testing.")
+flags.DEFINE_integer("mini_batch_size", None, "Batch size for testing.")
+flags.DEFINE_integer("scale", None, "CFG scale.")
+
+# Optimizer parameters
+flags.DEFINE_string("optimizer_name", None, "Optimizer name.")
+flags.DEFINE_float("lr", None, "Learning rate.")
+flags.DEFINE_float("weight_decay", None, "Weight decay.")
+flags.DEFINE_string("betas", None, "Betas for optimizer (format: '0.9,0.9').")
+
+# DataLoader parameters
+flags.DEFINE_integer("num_workers", None, "Number of workers for DataLoader.")
+
 
 def get_config_name():
     argv = sys.argv
@@ -647,6 +688,62 @@ def main(argv):
         config.dataset.test_tar_pattern = FLAGS.test_tar_pattern
     if FLAGS.vis_image_root:
         config.dataset.vis_image_root = FLAGS.vis_image_root
+    
+    # Training parameters
+    if FLAGS.n_steps is not None:
+        config.train.n_steps = FLAGS.n_steps
+    if FLAGS.batch_size is not None:
+        config.train.batch_size = FLAGS.batch_size
+    if FLAGS.log_interval is not None:
+        config.train.log_interval = FLAGS.log_interval
+    if FLAGS.eval_interval is not None:
+        config.train.eval_interval = FLAGS.eval_interval
+    if FLAGS.save_interval is not None:
+        config.train.save_interval = FLAGS.save_interval
+    if FLAGS.n_samples_eval is not None:
+        config.train.n_samples_eval = FLAGS.n_samples_eval
+    
+    # Dataset parameters
+    if FLAGS.dataset_name is not None:
+        config.dataset.name = FLAGS.dataset_name
+    if FLAGS.task is not None:
+        config.dataset.task = FLAGS.task
+    if FLAGS.resolution is not None:
+        config.dataset.resolution = FLAGS.resolution
+    if FLAGS.shuffle_buffer is not None:
+        config.dataset.shuffle_buffer = FLAGS.shuffle_buffer
+    if FLAGS.resampled is not None:
+        config.dataset.resampled = FLAGS.resampled
+    if FLAGS.split_data_by_node is not None:
+        config.dataset.split_data_by_node = FLAGS.split_data_by_node
+    if FLAGS.estimated_samples_per_shard is not None:
+        config.dataset.estimated_samples_per_shard = FLAGS.estimated_samples_per_shard
+    
+    # Sample parameters
+    if FLAGS.sample_steps is not None:
+        config.sample.sample_steps = FLAGS.sample_steps
+    if FLAGS.n_samples is not None:
+        config.sample.n_samples = FLAGS.n_samples
+    if FLAGS.mini_batch_size is not None:
+        config.sample.mini_batch_size = FLAGS.mini_batch_size
+    if FLAGS.scale is not None:
+        config.sample.scale = FLAGS.scale
+    
+    # Optimizer parameters
+    if FLAGS.optimizer_name is not None:
+        config.optimizer.name = FLAGS.optimizer_name
+    if FLAGS.lr is not None:
+        config.optimizer.lr = FLAGS.lr
+    if FLAGS.weight_decay is not None:
+        config.optimizer.weight_decay = FLAGS.weight_decay
+    if FLAGS.betas is not None:
+        # Parse betas string like "0.9,0.9" to tuple (0.9, 0.9)
+        betas_values = [float(x.strip()) for x in FLAGS.betas.split(',')]
+        config.optimizer.betas = tuple(betas_values)
+    
+    # DataLoader parameters
+    if FLAGS.num_workers is not None:
+        config.num_workers = FLAGS.num_workers
     
     train(config)
 
