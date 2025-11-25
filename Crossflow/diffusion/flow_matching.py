@@ -1,4 +1,3 @@
-
 import logging
 from typing import Callable, Dict, Optional, Tuple
 
@@ -35,7 +34,69 @@ def kl_divergence(source, target):
 
     return kl_div_1
 
-
+def gather_features(
+    image_features,
+    text_features,
+    local_loss=False,
+    gather_with_grad=False,
+    rank=0,
+    world_size=1,
+    use_horovod=False
+):
+    """
+    从所有GPU收集特征，用于多GPU训练时的对比学习。
+    
+    Args:
+        image_features: [batch_size, feature_dim] 图像特征
+        text_features: [batch_size, feature_dim] 文本特征
+        local_loss: 是否使用本地损失
+        gather_with_grad: 是否在收集时保留梯度
+        rank: 当前进程的rank
+        world_size: 总进程数
+        use_horovod: 是否使用horovod
+    
+    Returns:
+        all_image_features: [world_size * batch_size, feature_dim] 所有GPU的图像特征
+        all_text_features: [world_size * batch_size, feature_dim] 所有GPU的文本特征
+    """
+    if use_horovod:
+        # Horovod 实现（如果需要）
+        try:
+            import horovod.torch as hvd
+            all_image_features = hvd.allgather(image_features)
+            all_text_features = hvd.allgather(text_features)
+            return all_image_features, all_text_features
+        except ImportError:
+            logging.warning("Horovod not available, falling back to torch.distributed")
+    
+    # 使用 torch.distributed
+    try:
+        import torch.distributed as dist
+        
+        if not dist.is_available() or not dist.is_initialized():
+            # 如果没有初始化分布式，直接返回原始特征
+            logging.warning("torch.distributed not initialized, returning original features")
+            return image_features, text_features
+        
+        # 收集所有GPU的特征
+        gathered_image_features = [
+            torch.zeros_like(image_features) for _ in range(world_size)
+        ]
+        gathered_text_features = [
+            torch.zeros_like(text_features) for _ in range(world_size)
+        ]
+        
+        dist.all_gather(gathered_image_features, image_features)
+        dist.all_gather(gathered_text_features, text_features)
+        
+        # 拼接所有GPU的特征
+        all_image_features = torch.cat(gathered_image_features, dim=0)
+        all_text_features = torch.cat(gathered_text_features, dim=0)
+        
+        return all_image_features, all_text_features
+    except Exception as e:
+        logging.warning(f"Error in gather_features: {e}, returning original features")
+        return image_features, text_features
 
 class TimeStepSampler:
     """
@@ -271,6 +332,8 @@ class FlowMatching(nn.Module):
         sigma_min: float = 1e-5,
         sigma_max: float = 1.0,
         timescale: float = 1.0,
+        world_size: int = 1,
+        rank: int = 0,
         **kwargs,
     ):
         # LatentDiffusion/DDPM will create too many class variables we do not need
@@ -280,7 +343,13 @@ class FlowMatching(nn.Module):
         self.sigma_max = sigma_max
         self.timescale = timescale
 
-        self.clip_loss = ClipLoss()
+        # 使用 local_loss=True，既保证损失不为0（logits形状从[1,1]变为[1,8]
+        # 又保证梯度可以回传到本地特征（使用本地特征计算logits）
+        self.clip_loss = ClipLoss(
+            world_size=world_size, 
+            rank=rank,
+            local_loss=True  # 关键：使用本地损失模式，保持梯度流
+        )
         # self.SigLipLoss = SigLipLoss()
 
         self.resizer = transforms.Resize(256) # for clip
@@ -704,4 +773,3 @@ class ODEFlowMatchingSolver(Solver):
             **kwargs,
         )
         return samples, intermediates
-

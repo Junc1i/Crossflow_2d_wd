@@ -64,15 +64,37 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch \
   --mixed_precision fp16 \
   train_t2i.py \
   --config=configs/t2i_training_demo.py \
-  --workdir_base=/your/custom/workdir/base \ # 保存保存模型权重，训练可视化样本以及日志的路径
-  --vae_pretrained_path=/path/to/autoencoder_kl.pth \ # Image vae权重路径
-  --model_pretrained_path=/path/to/t2i_256px_clip_dimr.pth \ # 预训练权重路径
-  --fid_stat_path=/path/to/fid_stats_mscoco256_val.npz \  # fid_stats_mscoco256_val.npz路径
-  --inception_ckpt_path=/path/to/pt_inception-2015-12-05-6726825d.pth \ # inceptionv3权重路径
-  --sample_path=/path/to/samplesave_wo_textbox \ # 测试集采样保存图片路径
-  --train_tar_pattern='/path/to/pairs-{000000..000xxx}.tar' \ # 指定训练集shard文件
-  --test_tar_pattern='/path/to/pairs-000xxx.tar' \ # 指定测试集shard文件，3个即可
-  --vis_image_root=/path/to/run_vis/ \ # # 使用之前的那15个可视化图片的路径，该路径下需要有input和output两个子文件夹
+  --workdir_base="/your/custom/workdir/base" \ # 保存保存模型权重，训练可视化样本以及日志的路径
+  --vae_pretrained_path="/path/to/autoencoder_kl.pth" \ # Image vae权重路径
+  --model_pretrained_path="/path/to/t2i_256px_clip_dimr.pth" \ # 预训练权重路径
+  --fid_stat_path="/path/to/fid_stats_mscoco256_val.npz" \  # fid_stats_mscoco256_val.npz路径
+  --inception_ckpt_path="/path/to/pt_inception-2015-12-05-6726825d.pth" \ # inceptionv3权重路径
+  --sample_path="/path/to/samplesave_wo_textbox" \ # 测试集采样保存图片路径
+  --train_tar_pattern="/path/to/pairs-{000000..000xxx}.tar" \ # 指定训练集shard文件
+  --test_tar_pattern="/path/to/pairs-000xxx.tar" \ # 指定测试集shard文件，3个即可
+  --vis_image_root="/path/to/run_vis/" \ # 使用之前的那15个可视化图片的路径，该路径下需要有input和output两个子文件夹
+  --n_steps=600000 \ # 训练步数
+  --batch_size=8 \ # 批次
+  --log_interval=10 \ #打印loss的间隔步数
+  --eval_interval=100 \ # 训练可视化的间隔步数
+  --save_interval=100 \ # 保存model weights的间隔步数
+  --n_samples_eval=15 \ # 训练可视化的样本数
+  --dataset_name=online_features \ # 训练模式
+  --task=visual_instruction \ # 训练数据集
+  --resolution=256 \ # 训练模型生成的图片分辨率
+  --shuffle_buffer=300 \ # wds的shuffle缓冲区
+  --resampled=True \ # 是否重采样
+  --split_data_by_node=True \ # 是否多卡训练
+  --estimated_samples_per_shard=1000 \ # 每个shard文件中的pairs数
+  --sample_steps=50 \ # 测试迭代步数
+  --n_samples=30000 \ # 训练完之后采样的样本数，保持为30000
+  --mini_batch_size=1 \ # 测试时每个gpu的batch数
+  --scale=7 \ # cfg_sclae保持不变
+  --optimizer_name=adamw \ # 使用的优化器类型
+  --lr=0.00001 \ # 学习率
+  --weight_decay=0.03 \ # 衰减率
+  --betas=0.9,0.9 \ # 动量衰减参数
+  --num_workers=8 \ # 并行进程数
   2>&1 | tee log.txt
 # 多机多卡
 accelerate launch \
@@ -94,6 +116,28 @@ accelerate launch \
   --train_tar_pattern='/path/to/pairs-{000000..000009}.tar' \
   --test_tar_pattern='/path/to/pairs-000010.tar' \
   --vis_image_root=/path/to/run_vis/ \
+  --n_steps=600000 \ 
+  --batch_size=8 \ 
+  --log_interval=10 \
+  --eval_interval=100 \ 
+  --save_interval=100 \ 
+  --n_samples_eval=15 \ 
+  --dataset_name=online_features \ 
+  --task=visual_instruction \ 
+  --resolution=256 \ 
+  --shuffle_buffer=300 \ 
+  --resampled=True \ 
+  --split_data_by_node=True \ 
+  --estimated_samples_per_shard=1000 \ 
+  --sample_steps=50 \
+  --n_samples=30000 \ 
+  --mini_batch_size=1 \ 
+  --scale=7 \ 
+  --optimizer_name=adamw \ 
+  --lr=0.00001 \ 
+  --weight_decay=0.03 \ 
+  --betas=0.9,0.9 \ 
+  --num_workers=8 \ 
   2>&1 | tee log.txt
 ```
 

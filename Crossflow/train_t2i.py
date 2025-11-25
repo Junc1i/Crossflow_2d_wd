@@ -256,7 +256,17 @@ def train(config):
 
     context_generator = get_context_generator()
 
-    _flow_mathcing_model = FlowMatching()
+    # 获取分布式训练参数
+    world_size = accelerator.num_processes
+    rank = accelerator.process_index
+    
+    # 创建 FlowMatching，传递 world_size 和 rank 以支持多GPU特征收集
+    _flow_mathcing_model = FlowMatching(world_size=world_size, rank=rank)
+    
+    # 调试信息
+    if accelerator.is_main_process:
+        logging.info(f"FlowMatching initialized with world_size={world_size}, rank={rank}")
+        logging.info(f"ClipLoss will use multi-GPU feature gathering: {world_size > 1}")
 
     def train_step(_batch, _ss_empty_context):
         _metrics = dict()
