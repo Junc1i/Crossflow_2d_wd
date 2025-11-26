@@ -96,6 +96,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch \
   --weight_decay=0.03 \ # 衰减率，保持不变
   --betas=0.9,0.9 \ # 动量衰减参数，保持不变
   --num_workers=8 \ # 并行进程数
+  --adamw_impl=AdamW \ # "AdamW", "AdamW8bit"
   2>&1 | tee log.txt
 # 多机多卡
 accelerate launch \
