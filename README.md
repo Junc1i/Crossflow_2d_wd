@@ -69,6 +69,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch \
   --model_pretrained_path="/path/to/t2i_256px_clip_dimr.pth" \ # 预训练权重路径
   --fid_stat_path="/path/to/fid_stats_mscoco256_val.npz" \  # fid_stats_mscoco256_val.npz路径
   --inception_ckpt_path="/path/to/pt_inception-2015-12-05-6726825d.pth" \ # inceptionv3权重路径
+  --resume_ckpt_root='/storage/v-jinpewang/lab_folder/junchao/Crossflow_training/Crossflow_2d_wd/work/workdir_wo_textbox/t2i_training_demo/default/ckpts/60000.ckpt' \ # 指定一开始使用的resume文件，train from scratch情况下不使用
   --sample_path="/path/to/samplesave_wo_textbox" \ # 测试集采样保存图片路径
   --train_tar_pattern="/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_edit/pairs-{000000..000028}.tar,/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_recon/pairs-{000000..000007}.tar" \ # 指定训练集shard文件，不同是数据集下的路径使用','分割即可
   --test_tar_pattern="/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_edit/pairs-000029.tar,/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_recon/pairs-000008.tar" \ # 指定测试集shard文件，不同数据集各用26个shard总共52个，可以直接指定不同路径下的tar文件不需要move。路径使用','分割即可
@@ -112,6 +113,7 @@ accelerate launch \
   --model_pretrained_path="/storage/v-jinpewang/lab_folder/qisheng_data/t2i_256px_clip_dimr.pth" \
   --fid_stat_path="/storage/v-jinpewang/lab_folder/qisheng_data/assets/fid_stats/fid_stats_mscoco256_val.npz" \
   --inception_ckpt_path="/storage/v-jinpewang/lab_folder/qisheng_data/inceptionckpt/pt_inception-2015-12-05-6726825d.pth" \
+  --resume_ckpt_root='/storage/v-jinpewang/lab_folder/junchao/Crossflow_training/Crossflow_2d_wd/work/workdir_wo_textbox/t2i_training_demo/default/ckpts/60000.ckpt' \
   --sample_path="/storage/v-jinpewang/lab_folder/junchao/Crossflow_training/Crossflow_2d_wd/sample/samplesave_wo_textbox" \
   --train_tar_pattern="/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_edit/pairs-{000000..000028}.tar,/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_recon/pairs-{000000..000007}.tar" \ # 指定训练集shard文件，不同是数据集下的路径使用','分割即可
   --test_tar_pattern="/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_edit/pairs-000029.tar,/storage/v-jinpewang/lab_folder/junchao/crossflow_data/test_webdataset/test_recon/pairs-000008.tar" \ # 指定测试集shard文件，不同数据集各用51个shard.路径使用','分割即可

@@ -191,7 +191,18 @@ def train(config):
     nnet, nnet_ema, optimizer, train_dataset_loader, test_dataset_loader = accelerator.prepare(
         train_state.nnet, train_state.nnet_ema, train_state.optimizer, train_dataset_loader, test_dataset_loader)
     lr_scheduler = train_state.lr_scheduler
-    train_state.resume(config.ckpt_root)
+    # 使用 resume_ckpt_root 进行 resume，保存时仍然使用 ckpt_root
+    # 支持两种格式：
+    # 1. checkpoint 目录路径（如 /path/to/ckpts/60000.ckpt，其中 60000.ckpt 是目录）
+    # 2. ckpt_root 目录路径（如 /path/to/ckpts，会在其中查找最新的 checkpoint）
+    resume_path = config.resume_ckpt_root
+    if resume_path and resume_path.endswith('.ckpt') and os.path.isdir(resume_path):
+        # 如果指定的是 checkpoint 目录路径（以 .ckpt 结尾且是目录），直接使用 load
+        logging.info(f'从 checkpoint 目录直接加载: {resume_path}')
+        train_state.load(resume_path)
+    else:
+        # 否则使用 resume，会在目录中查找最新的 checkpoint
+        train_state.resume(resume_path)
 
     
 #    for param in nnet.parameters():
@@ -596,6 +607,7 @@ flags.DEFINE_string("sample_path", None, "Path to save samples.")
 flags.DEFINE_string("train_tar_pattern", None, "Training tar pattern for WebDataset.")
 flags.DEFINE_string("test_tar_pattern", None, "Test tar pattern for WebDataset.")
 flags.DEFINE_string("vis_image_root", None, "Path to visualization images root.")
+flags.DEFINE_string("resume_ckpt_root", None, "Path to checkpoint root directory for resuming. If not provided, uses workdir/ckpts.")
 
 # Training parameters
 flags.DEFINE_integer("n_steps", None, "Total training iterations.")
@@ -668,7 +680,13 @@ def main(argv):
         default_workdir_base = '/storage/v-jinpewang/lab_folder/junchao/Crossflow_training/Crossflow_2d_wd/work/workdir_wo_textbox'
         workdir_base = FLAGS.workdir_base or default_workdir_base
         config.workdir = os.path.join(workdir_base, config.config_name, config.hparams)
+    # ckpt_root 始终用于保存 checkpoint，始终使用 workdir/ckpts
     config.ckpt_root = os.path.join(config.workdir, 'ckpts')
+    # resume_ckpt_root 用于 resume，如果指定了则使用指定的路径，否则使用 ckpt_root
+    if FLAGS.resume_ckpt_root:
+        config.resume_ckpt_root = FLAGS.resume_ckpt_root
+    else:
+        config.resume_ckpt_root = config.ckpt_root
     config.sample_dir = os.path.join(config.workdir, 'samples')
     
     # 如果通过命令行传入路径，则覆盖配置文件中的路径
