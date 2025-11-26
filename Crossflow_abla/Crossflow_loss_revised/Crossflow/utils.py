@@ -80,10 +80,10 @@ def get_optimizer(params, name, **kwargs):
         from torch.optim import Adam
         return Adam(params, **kwargs)
     elif name == 'adamw':
-       from torch.optim import AdamW
-       return AdamW(params, **kwargs)
-        # from bitsandbytes.optim import AdamW8bit
-        # return AdamW8bit(params, **kwargs)
+#        from torch.optim import AdamW
+#        return AdamW(params, **kwargs)
+        from bitsandbytes.optim import AdamW8bit
+        return AdamW8bit(params, **kwargs)
     elif name == 'adafactor':
         from torch.optim import Adafactor
         return Adafactor(params, **kwargs)
