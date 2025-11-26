@@ -68,4 +68,5 @@ accelerate launch \
     --lr=0.00001 \
     --weight_decay=0.03 \
     --betas=0.9,0.9 \
+    --adamw_impl=AdamW \
     --num_workers=16

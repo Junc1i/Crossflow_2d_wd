@@ -19,19 +19,19 @@ model = Args(
     gradient_checking=True,
     cfg_indicator=0.1,
     textVAE = Args(
-        num_blocks = 6,
-        hidden_dim = 1024,  # 降低维度 从1024降到768
-        hidden_token_length = 256,  # 从256降到192
+        num_blocks = 11,
+        hidden_dim = 1024,
+        hidden_token_length = 256,
         num_attention_heads = 8,
         dropout_prob = 0.1,
     ),
     stage_configs = [
             Args(
                 block_type = "TransformerBlock", 
-                dim = 1024,  
-                hidden_dim = 2048,  
-                num_attention_heads = 16,  
-                num_blocks = 65, 
+                dim = 1024,  # channel
+                hidden_dim = 2048,
+                num_attention_heads = 16,
+                num_blocks = 65,  # depth
                 max_height = 16,
                 max_width = 16,
                 image_input_ratio = 1,
@@ -41,10 +41,10 @@ model = Args(
             ),
             Args(
                 block_type = "ConvNeXtBlock", 
-                dim = 512,  
-                hidden_dim = 1024,  
+                dim = 512, 
+                hidden_dim = 1024, 
                 kernel_size = 7, 
-                num_blocks = 33,  # 从33降到20用以减少显存占
+                num_blocks = 33,
                 max_height = 32,
                 max_width = 32,
                 image_input_ratio = 1,
@@ -89,6 +89,7 @@ def get_config():
         lr=0.00001,                                             # learning rate
         weight_decay=0.03,
         betas=(0.9, 0.9),
+        adamw_impl='AdamW8bit',
     )
 
     config.lr_scheduler = d(

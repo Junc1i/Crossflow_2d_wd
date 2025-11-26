@@ -86,6 +86,7 @@ def train(config):
                    name=config.hparams, job_type='train', mode='offline')
         utils.set_logger(log_level='info', fname=os.path.join(config.workdir, 'output.log'))
         logging.info(config)
+        logging.info(f'Optimizer config: {config.optimizer}')
     else:
         utils.set_logger(log_level='error')
         builtins.print = lambda *args: None
@@ -637,6 +638,7 @@ flags.DEFINE_string("optimizer_name", None, "Optimizer name.")
 flags.DEFINE_float("lr", None, "Learning rate.")
 flags.DEFINE_float("weight_decay", None, "Weight decay.")
 flags.DEFINE_string("betas", None, "Betas for optimizer (format: '0.9,0.9').")
+flags.DEFINE_enum("adamw_impl", None, ["torch", "bitsandbytes", "AdamW", "AdamW8bit"], "Select AdamW backend.")
 
 # DataLoader parameters
 flags.DEFINE_integer("num_workers", None, "Number of workers for DataLoader.")
@@ -758,7 +760,9 @@ def main(argv):
         # Parse betas string like "0.9,0.9" to tuple (0.9, 0.9)
         betas_values = [float(x.strip()) for x in FLAGS.betas.split(',')]
         config.optimizer.betas = tuple(betas_values)
-    
+    if FLAGS.adamw_impl is not None:
+        config.optimizer.adamw_impl = FLAGS.adamw_impl
+
     # DataLoader parameters
     if FLAGS.num_workers is not None:
         config.num_workers = FLAGS.num_workers

@@ -43,7 +43,6 @@ accelerate launch \
     --model_pretrained_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/pretrained_models/t2i_256px_clip_dimr.pth" \
     --fid_stat_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/assets/fid_stats/fid_stats_mscoco256_val.npz" \
     --inception_ckpt_path="/mnt/bn/pistis/weixian/ckpt/inceptionckpt/pt_inception-2015-12-05-6726825d.pth" \
-    --resume_ckpt_root='/mnt/hdfs/pistis/weixian/exp/flowone-visual-inst-image-inp/t2i_training_demo/default/ckpts/42968.ckpt' \
     --sample_path="/mnt/hdfs/pistis/weixian/exp/flow-one-pt-visual-instruction/save_test_samples" \
     --train_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{000000..001472}.tar" \
     --test_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{001473..001523}.tar" \
@@ -69,4 +68,5 @@ accelerate launch \
     --lr=0.00001 \
     --weight_decay=0.03 \
     --betas=0.9,0.9 \
+    --adamw_impl=AdamW \
     --num_workers=16

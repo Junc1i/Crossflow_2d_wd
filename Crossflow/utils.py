@@ -75,15 +75,20 @@ def set_seed(seed: int):
         np.random.seed(seed)
 
 
-def get_optimizer(params, name, **kwargs):
+def get_optimizer(params, name, adamw_impl=None, **kwargs):
     if name == 'adam':
         from torch.optim import Adam
         return Adam(params, **kwargs)
     elif name == 'adamw':
-       from torch.optim import AdamW
-       return AdamW(params, **kwargs)
-        # from bitsandbytes.optim import AdamW8bit
-        # return AdamW8bit(params, **kwargs)
+        impl = (adamw_impl or 'bitsandbytes').lower()
+        if impl in ('torch', 'adamw'):
+            from torch.optim import AdamW
+            return AdamW(params, **kwargs)
+        elif impl in ('bitsandbytes', 'adamw8bit'):
+            from bitsandbytes.optim import AdamW8bit
+            return AdamW8bit(params, **kwargs)
+        else:
+            raise ValueError(f'Unsupported AdamW implementation: {impl}')
     elif name == 'adafactor':
         from torch.optim import Adafactor
         return Adafactor(params, **kwargs)
@@ -664,4 +669,3 @@ def get_input_image_embeddings_and_masks(
         batch_attention_masks = batch_attention_masks[:, :output_tokens]  # [batch_size, output_tokens]
     
     return batch_embeddings, batch_attention_masks
-
