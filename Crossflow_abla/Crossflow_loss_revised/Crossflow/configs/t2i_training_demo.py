@@ -89,6 +89,7 @@ def get_config():
         lr=0.00001,                                             # learning rate
         weight_decay=0.03,
         betas=(0.9, 0.9),
+        adamw_impl='AdamW',
     )
 
     config.lr_scheduler = d(
