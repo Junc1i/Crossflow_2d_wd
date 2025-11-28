@@ -82,8 +82,23 @@ def train(config):
         os.makedirs(config.sample_dir, exist_ok=True)
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        wandb.init(dir=os.path.abspath(config.workdir), project=f'uvit_{config.dataset.name}', config=config.to_dict(),
-                   name=config.hparams, job_type='train', mode='offline')
+        # WandB 配置：支持命令行参数、配置文件或环境变量
+        # wandb_mode 优先级：命令行参数 > 配置文件 > 环境变量 > 默认值(online)
+        wandb_mode = (
+            getattr(config, 'wandb_mode', None) or  # 命令行参数或配置文件
+            os.environ.get('WANDB_MODE', None) or   # 环境变量
+            'online'  # 默认值
+        )
+        
+        # wandb_project 优先级：命令行参数 > 配置文件 > 环境变量 > 默认命名
+        wandb_project = (
+            getattr(config, 'wandb_project', None) or  # 命令行参数或配置文件
+            os.environ.get('WANDB_PROJECT', None) or   # 环境变量
+            f'{config.config_name}_{config.dataset.name}'  # 默认：配置名_数据集名
+        )
+        
+        wandb.init(dir=os.path.abspath(config.workdir), project=wandb_project, config=config.to_dict(),
+                   name=config.hparams, job_type='train', mode=wandb_mode)
         utils.set_logger(log_level='info', fname=os.path.join(config.workdir, 'output.log'))
         logging.info(config)
         logging.info(f'Optimizer config: {config.optimizer}')
@@ -436,6 +451,21 @@ def train(config):
                 with open(os.path.join(config.workdir, 'eval.log'), 'a') as f:
                     print(f'step={train_state.step} fid{n_samples}={_fid}', file=f)
                 wandb.log({f'fid{n_samples}': _fid}, step=train_state.step)
+                # 读取保存的图片并单独上传到 wandb
+                # sample2dir_with_gt 保存的图片是水平拼接的 [generated, gt]
+                # 读取所有保存的图片并分别上传，key 中包含 step 信息以便区分不同时间点的评估结果
+                eval_images = []
+                for i in range(n_samples):
+                    img_path = os.path.join(path, f"{i}.png")
+                    if os.path.exists(img_path):
+                        # 读取图片
+                        img_pil = Image.open(img_path).convert("RGB")
+                        eval_images.append(wandb.Image(img_pil, caption=f"eval_sample_{i}_step_{train_state.step}"))
+                
+                if eval_images:
+                    # 使用列表方式上传多张图片，key 中包含 step 信息
+                    wandb.log({f'eval_samples_{n_samples}_step_{train_state.step}': eval_images}, step=train_state.step)
+                    logging.info(f'Uploaded {len(eval_images)} evaluation samples to wandb at step {train_state.step}')
             _fid = torch.tensor(_fid, device=device)
             _fid = accelerator.reduce(_fid, reduction='sum') # 用 accelerator.reduce 把主进程的FID广播/规约到所有进程
 
@@ -610,6 +640,10 @@ flags.DEFINE_string("test_tar_pattern", None, "Test tar pattern for WebDataset."
 flags.DEFINE_string("vis_image_root", None, "Path to visualization images root.")
 flags.DEFINE_string("resume_ckpt_root", None, "Path to checkpoint root directory for resuming. If not provided, uses workdir/ckpts.")
 
+# WandB parameters
+flags.DEFINE_string("wandb_project", None, "WandB project name. If not provided, uses config.wandb_project or default naming.")
+flags.DEFINE_enum("wandb_mode", None, ["online", "offline", "disabled"], "WandB mode: online (sync to cloud), offline (local only), or disabled.")
+
 # Training parameters
 flags.DEFINE_integer("n_steps", None, "Total training iterations.")
 flags.DEFINE_integer("batch_size", None, "Overall batch size across ALL gpus.")
@@ -690,6 +724,12 @@ def main(argv):
     else:
         config.resume_ckpt_root = config.ckpt_root
     config.sample_dir = os.path.join(config.workdir, 'samples')
+
+    # WandB 配置：命令行参数优先级最高
+    if FLAGS.wandb_project:
+        config.wandb_project = FLAGS.wandb_project
+    if FLAGS.wandb_mode:
+        config.wandb_mode = FLAGS.wandb_mode
     
     # 如果通过命令行传入路径，则覆盖配置文件中的路径
     if FLAGS.vae_pretrained_path:

@@ -51,7 +51,7 @@ accelerate launch \
     --batch_size=256 \
     --log_interval=10 \
     --eval_interval=1000 \
-    --save_interval=10000 \
+    --save_interval=60000 \
     --n_samples_eval=15 \
     --dataset_name=online_features \
     --task=visual_instruction \
@@ -69,4 +69,6 @@ accelerate launch \
     --weight_decay=0.03 \
     --betas=0.9,0.9 \
     --adamw_impl=AdamW \
+    --wandb_project=crossflow_2d_mixed_journeydb_visual_instruction \
+    --wandb_mode=online \
     --num_workers=16
