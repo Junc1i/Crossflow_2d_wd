@@ -20,6 +20,31 @@ NPROC=$((NNODES * NPROC_PER_NODE))
 
 RUN_EXP=$1
 
+# add wandb api key
+WANDB_API_KEY=""
+
+# 获取 WANDB_API_KEY
+if [ -n "$2" ]; then
+    WANDB_API_KEY=$2
+fi
+
+# 检查是否提供了 WANDB_API_KEY
+if [ -z "$WANDB_API_KEY" ]; then
+    echo "Error: WANDB_API_KEY not provided."
+    echo "Please set WANDB_API_KEY in the script (line 5) or provide it as the second argument."
+    exit 1
+fi
+
+# 登录 wandb
+echo "Logging in to wandb..."
+export WANDB_API_KEY=$WANDB_API_KEY
+wandb login --relogin $WANDB_API_KEY
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to login to wandb. Exiting..."
+    exit 1
+fi
+echo "Successfully logged in to wandb"
+
 echo $RUN_EXP
 echo $NODE_RANK
 echo $NPROC
