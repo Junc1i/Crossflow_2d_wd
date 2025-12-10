@@ -18,22 +18,8 @@ MASTER_PORT=${MASTER_PORT:=$(echo "$ARNOLD_WORKER_0_PORT" | cut -d "," -f 1)}
 MASTER_PORT=${MASTER_PORT:=$(echo "$ARNOLD_EXECUTOR_0_PORT" | cut -d "," -f 1)}
 NPROC=$((NNODES * NPROC_PER_NODE))
 
-RUN_EXP=$1
-
 # add wandb api key
 WANDB_API_KEY=""
-
-# 获取 WANDB_API_KEY
-if [ -n "$2" ]; then
-    WANDB_API_KEY=$2
-fi
-
-# 检查是否提供了 WANDB_API_KEY
-if [ -z "$WANDB_API_KEY" ]; then
-    echo "Error: WANDB_API_KEY not provided."
-    echo "Please set WANDB_API_KEY in the script (line 5) or provide it as the second argument."
-    exit 1
-fi
 
 # 登录 wandb
 echo "Logging in to wandb..."
@@ -45,13 +31,12 @@ if [ $? -ne 0 ]; then
 fi
 echo "Successfully logged in to wandb"
 
-echo $RUN_EXP
 echo $NODE_RANK
 echo $NPROC
 echo $MASTER_ADDR
 echo $MASTER_PORT
 
-cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d/${RUN_EXP}
+cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d_wd/Crossflow_abla/Crossflow_cross_atten_batch
 
 accelerate launch \
     --main_process_ip $MASTER_ADDR \
@@ -63,12 +48,12 @@ accelerate launch \
     --mixed_precision bf16 \
     Crossflow/train_t2i.py \
     --config=Crossflow/configs/t2i_training_demo.py \
-    --workdir_base="/mnt/hdfs/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1" \
+    --workdir_base="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1" \
     --vae_pretrained_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/assets/stable-diffusion/autoencoder_kl.pth" \
     --model_pretrained_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/pretrained_models/t2i_256px_clip_dimr.pth" \
     --fid_stat_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/assets/fid_stats/fid_stats_mscoco256_val.npz" \
-    --inception_ckpt_path="/mnt/bn/pistis/weixian/ckpt/inceptionckpt/pt_inception-2015-12-05-6726825d.pth" \
-    --sample_path="/mnt/hdfs/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1/save_test_samples" \
+    --inception_ckpt_path="/mnt/bn/pistis/weixian/ckpt/pt_inception-2015-12-05-6726825d.pth" \
+    --sample_path="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1/save_test_samples" \
     --train_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{000000..001497}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{000000..007356}.tar" \
     --test_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{001498..001523}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{007357..007382}.tar" \
     --vis_image_root="/mnt/bn/pistis/weixian/data/flowone/visual_instruction_dataset_vis" \
