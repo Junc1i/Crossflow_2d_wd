@@ -137,11 +137,78 @@ class TrainState(object):
             ema(self.nnet_ema, self.nnet, rate)
 
     def save(self, path):
-        os.makedirs(path, exist_ok=True)
-        torch.save(self.step, os.path.join(path, 'step.pth'))
-        for key, val in self.__dict__.items():
-            if key != 'step' and val is not None:
-                torch.save(val.state_dict(), os.path.join(path, f'{key}.pth'))
+        import shutil
+        import time
+        import logging
+        
+        max_retries = 1
+        retry_delay = 5  # s
+        
+        for attempt in range(max_retries):
+            temp_path = path + f'.tmp_{int(time.time())}'
+            backup_path = path + '.backup'
+            
+            try:
+                # 1. 如果目标路径已存在但不完整，先清理
+                if os.path.exists(path):
+                    try:
+                        # 检查是否是完整的checkpoint（检查step.pth是否存在）
+                        if not os.path.exists(os.path.join(path, 'step.pth')):
+                            logging.warning(f'Incomplete checkpoint detected at {path}, removing...')
+                            shutil.rmtree(path)
+                    except Exception as e:
+                        logging.warning(f'Error checking checkpoint integrity: {e}')
+                
+                # 2. 清理当前checkpoint相关的临时目录（只清理自己的）
+                if os.path.exists(temp_path):
+                    shutil.rmtree(temp_path)
+                if os.path.exists(backup_path):
+                    shutil.rmtree(backup_path)
+                
+                # 3. 创建临时目录并保存
+                os.makedirs(temp_path, exist_ok=True)
+                
+                # 4. 保存所有文件到临时目录
+                torch.save(self.step, os.path.join(temp_path, 'step.pth'))
+                for key, val in self.__dict__.items():
+                    if key != 'step' and val is not None:
+                        torch.save(val.state_dict(), os.path.join(temp_path, f'{key}.pth'))
+                
+                # 5. 原子性移动
+                if os.path.exists(path):
+                    shutil.move(path, backup_path)
+                    try:
+                        shutil.move(temp_path, path)
+                        # 成功后删除备份
+                        shutil.rmtree(backup_path)
+                    except Exception as e:
+                        # 失败则恢复备份
+                        if os.path.exists(backup_path):
+                            shutil.move(backup_path, path)
+                        raise
+                else:
+                    shutil.move(temp_path, path)
+                
+                logging.info(f'Successfully saved checkpoint to {path}')
+                return  # 成功，退出
+                
+            except Exception as e:
+                logging.warning(f'Save attempt {attempt + 1}/{max_retries} failed: {e}')
+                
+                # 清理当前操作的临时文件
+                for tmp in [temp_path, backup_path]:
+                    if os.path.exists(tmp):
+                        try:
+                            shutil.rmtree(tmp)
+                        except:
+                            pass
+                
+                if attempt < max_retries - 1:
+                    logging.info(f'Retrying in {retry_delay} seconds...')
+                    time.sleep(retry_delay)
+                else:
+                    logging.error(f'Failed to save checkpoint after {max_retries} attempts')
+                    raise
 
     def load(self, path):
         logging.info(f'load from {path}')

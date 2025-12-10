@@ -637,13 +637,53 @@ def train(config):
             accelerator.wait_for_everyone()
             torch.cuda.empty_cache()
 
-        ############ save checkpoint and evaluate results
+         ############ save checkpoint and evaluate results
         if train_state.step % config.train.save_interval == 0 or train_state.step == config.train.n_steps:
             torch.cuda.empty_cache()
             logging.info(f'Save and eval checkpoint {train_state.step}...')
-
+            
+            # 加强进程同步,所有进程先等待
+            accelerator.wait_for_everyone()
+            
             if accelerator.local_process_index == 0:
-                train_state.save(os.path.join(config.ckpt_root, f'{train_state.step}.ckpt'))
+                import shutil
+                import time
+                
+                ckpt_path = os.path.join(config.ckpt_root, f'{train_state.step}.ckpt')
+                
+                # 清理整个checkpoint目录中过期的临时文件
+                try:
+                    for item in os.listdir(config.ckpt_root):
+                        if '.tmp_' in item or item.endswith('.backup'):
+                            tmp_path = os.path.join(config.ckpt_root, item)
+                            try:
+                                if os.path.isdir(tmp_path):
+                                    # 检查修改时间，如果超过1小时则删除
+                                    if time.time() - os.path.getmtime(tmp_path) > 3600:
+                                        logging.info(f'Removing stale temporary directory: {tmp_path}')
+                                        shutil.rmtree(tmp_path)
+                            except Exception as e:
+                                logging.warning(f'Error cleaning temporary file {tmp_path}: {e}')
+                except Exception as e:
+                    logging.warning(f'Error scanning checkpoint directory: {e}')
+                
+                # 先创建目录
+                os.makedirs(ckpt_path, exist_ok=True)
+                # 文件系统时间同步
+                time.sleep(1)
+            
+            # 再次同步，确保目录操作完成
+            accelerator.wait_for_everyone()
+            
+            if accelerator.local_process_index == 0:
+                ckpt_path = os.path.join(config.ckpt_root, f'{train_state.step}.ckpt')
+                try:
+                    train_state.save(ckpt_path)
+                except Exception as e:
+                    logging.error(f'Failed to save checkpoint at step {train_state.step}: {e}')
+                    # 不要让保存失败中断训练
+                    logging.warning('Continuing training despite checkpoint save failure')
+            
             accelerator.wait_for_everyone()
             ######需要修改n_samples
             fid = eval_step(n_samples=50, sample_steps=50)  # calculate fid of the saved checkpoint
