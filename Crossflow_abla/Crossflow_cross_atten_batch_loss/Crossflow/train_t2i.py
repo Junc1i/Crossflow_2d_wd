@@ -666,8 +666,8 @@ def train(config):
                                 logging.warning(f'Error cleaning temporary file {tmp_path}: {e}')
                 except Exception as e:
                     logging.warning(f'Error scanning checkpoint directory: {e}')
-            
-            # 同步，确保临时文件清理完成
+                           
+            # 同步，确保目录操作完成
             accelerator.wait_for_everyone()
             
             if accelerator.local_process_index == 0:

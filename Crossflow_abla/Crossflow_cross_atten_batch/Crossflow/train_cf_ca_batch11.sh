@@ -36,7 +36,7 @@ echo $NPROC
 echo $MASTER_ADDR
 echo $MASTER_PORT
 
-cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d_wd/Crossflow_abla/Crossflow_cross_atten_batch
+cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d_wd/Crossflow_abla/Crossflow_cross_atten_batch/Crossflow
 
 accelerate launch \
     --main_process_ip $MASTER_ADDR \
@@ -56,13 +56,13 @@ accelerate launch \
     --sample_path="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1/save_test_samples" \
     --train_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{000000..001497}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{000000..007356}.tar" \
     --test_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{001498..001523}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{007357..007382}.tar" \
-    --vis_image_root="/mnt/bn/pistis/weixian/data/flowone/visual_instruction_dataset_vis" \
+    --vis_image_root="/mnt/bn/pistis/weixian/data/flowone/test_vis" \
     --n_steps=600000 \
     --batch_size=256 \
     --log_interval=10 \
     --eval_interval=1000 \
     --save_interval=100000 \
-    --n_samples_eval=15 \
+    --n_samples_eval=11 \
     --dataset_name=online_features \
     --task=visual_instruction \
     --resolution=256 \
