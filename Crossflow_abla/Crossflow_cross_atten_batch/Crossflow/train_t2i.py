@@ -645,7 +645,7 @@ def train(config):
             # 加强进程同步,所有进程先等待
             accelerator.wait_for_everyone()
             
-            if accelerator.local_process_index == 0:
+            if accelerator.is_main_process:
                 import shutil
                 import time
                 
@@ -670,7 +670,7 @@ def train(config):
             # 同步，确保临时文件清理完成
             accelerator.wait_for_everyone()
             
-            if accelerator.local_process_index == 0:
+            if accelerator.is_main_process:
                 ckpt_path = os.path.join(config.ckpt_root, f'{train_state.step}.ckpt')
                 try:
                     train_state.save(ckpt_path)

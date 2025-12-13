@@ -642,7 +642,7 @@ def train(config):
             torch.cuda.empty_cache()
             logging.info(f'Save and eval checkpoint {train_state.step}...')
 
-            if accelerator.local_process_index == 0:
+            if accelerator.is_main_process:
                 train_state.save(os.path.join(config.ckpt_root, f'{train_state.step}.ckpt'))
             accelerator.wait_for_everyone()
             ######需要修改n_samples
