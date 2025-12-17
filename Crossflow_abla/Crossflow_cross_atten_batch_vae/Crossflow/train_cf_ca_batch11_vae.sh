@@ -48,12 +48,12 @@ accelerate launch \
     --mixed_precision bf16 \
     Crossflow/train_t2i.py \
     --config=Crossflow/configs/t2i_training_demo.py \
-    --workdir_base="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1-mlp-1b" \
+    --workdir_base="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1-vae" \
     --vae_pretrained_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/assets/stable-diffusion/autoencoder_kl.pth" \
     --model_pretrained_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/pretrained_models/t2i_256px_clip_dimr.pth" \
     --fid_stat_path="/mnt/bn/pistis/weixian/ckpt/CrossFlow/assets/fid_stats/fid_stats_mscoco256_val.npz" \
     --inception_ckpt_path="/mnt/bn/pistis/weixian/ckpt/pt_inception-2015-12-05-6726825d.pth" \
-    --sample_path="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1-mlp-1b/save_test_samples" \
+    --sample_path="/mnt/bn/pistis/weixian/exp/flow-one-pt-combined-crossatten-batch1-1-vae/save_test_samples" \
     --train_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{000000..001497}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{000000..007356}.tar" \
     --test_tar_pattern="/mnt/bn/zilongdata-us/weixian/data/visual_instruction_dataset_wds/pairs-{001498..001523}.tar,/mnt/hdfs/pistis/weixian/data/flowone/JourneyDB_wds/pairs-{007357..007382}.tar" \
     --vis_image_root="/mnt/bn/pistis/weixian/data/flowone/test_vis" \
@@ -81,6 +81,6 @@ accelerate launch \
     --betas=0.9,0.9 \
     --adamw_impl=AdamW \
     --use_cross_attention=true \
-    --wandb_project=crossflow_2d_mixed_ca_batch1-1-mlp-1b \
+    --wandb_project=crossflow_2d_mixed_ca_batch1-1-vae \
     --wandb_mode=online \
     --num_workers=16
