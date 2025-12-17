@@ -36,7 +36,7 @@ echo $NPROC
 echo $MASTER_ADDR
 echo $MASTER_PORT
 
-cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d_wd/Crossflow_abla/Crossflow_cross_atten_batch/Crossflow
+cd /mnt/bn/pistis/weixian/workplace/flowone/Crossflow_2d_wd/Crossflow_abla/Crossflow_cross_atten_batch_vae/Crossflow
 
 accelerate launch \
     --main_process_ip $MASTER_ADDR \
