@@ -83,7 +83,7 @@ accelerate launch \
     --use_cross_attention=true \
     --gate_warmup_steps=60000 \
     --gate_decay_steps=50000 \
-    --gate_min_value=0.5 \
+    --gate_min_value=0.3 \
     --wandb_project=crossflow_2d_mixed_ca_batch3-1-mlp-1b-arti-gate \
     --wandb_mode=online \
     --num_workers=16
