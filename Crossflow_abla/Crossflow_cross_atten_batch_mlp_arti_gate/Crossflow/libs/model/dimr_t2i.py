@@ -631,7 +631,7 @@ class MRModel(nn.Module):
 
         
     
-    def forward(self, x, t = None, log_snr = None, text_encoder=False, text_decoder=False, image_clip=False, shape=None, mask=None, null_indicator=None, image_latent=None):
+    def forward(self, x, t = None, log_snr = None, text_encoder=False, text_decoder=False, image_clip=False, shape=None, mask=None, null_indicator=None, image_latent=None, training_step=None):
         if text_encoder:
             # 应用适配层 [B, 576, 2048] → [B, 576, 768]
             adapted_cond = self.adapter(x)
