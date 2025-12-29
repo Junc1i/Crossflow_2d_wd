@@ -1,0 +1,2 @@
+Crossflow_cross_atten_batch_mlp_arti_gate
+前100k steps为1，后200k余弦衰减为0.1

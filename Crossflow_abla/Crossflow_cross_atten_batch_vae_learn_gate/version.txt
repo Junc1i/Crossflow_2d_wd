@@ -1,0 +1,4 @@
+learnable gate 
+cross_atten_gate = nn.Parameter(torch.tensor([-1]))
+gate = torch.sigmoid(self.cross_atten_gate) # initial 0.26
+x = x + gate * self.dropout(self.block1_cross(x, image_latent, pos))
