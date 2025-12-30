@@ -247,7 +247,7 @@ class TransformerBlock(nn.Module):
         if hasattr(config, 'use_cross_attention') and config.use_cross_attention:
             self.block1_cross = CrossAttention(config)
             self.use_cross_attention = True
-            self.cross_atten_gate = nn.Parameter(torch.tensor([-1]))
+            self.cross_atten_gate = nn.Parameter(torch.tensor([-1.1]))
         else:
             self.block1_cross = None
             self.use_cross_attention = False
