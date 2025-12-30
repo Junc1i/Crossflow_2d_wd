@@ -1,2 +1,3 @@
+已更新wds
 添加基于 Self-Attention 输出和 Cross-Attention 输出联合预测的 token-level 权重，
 用于自适应调制 Cross-Attention 对原图信息的利用程度

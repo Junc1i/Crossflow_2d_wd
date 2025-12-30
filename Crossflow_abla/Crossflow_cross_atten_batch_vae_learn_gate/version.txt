@@ -1,3 +1,4 @@
+已更新wds
 learnable gate 
 cross_atten_gate = nn.Parameter(torch.tensor([-1]))
 gate = torch.sigmoid(self.cross_atten_gate) # initial 0.26

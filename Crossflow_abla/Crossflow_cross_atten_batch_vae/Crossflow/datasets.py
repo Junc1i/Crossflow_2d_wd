@@ -167,20 +167,6 @@ def get_dataset_size(shards, estimated_sample_per_shard=1000):
         shards_list = list(braceexpand.braceexpand(shards))
     num_shards = len(shards_list)
     
-    # # 尝试从 num_samples.json 读取
-    # if len(shards_list) > 0:
-    #     dir_path = os.path.dirname(shards_list[0])
-    #     sizes_filename = os.path.join(dir_path, "num_samples.json")
-    #     try:
-    #         with open(sizes_filename, "r") as fp:
-    #             sizes = json.load(fp)
-    #         total_size = sum([int(sizes.get(os.path.basename(shard), 0)) for shard in shards_list])
-    #         if total_size > 0:
-    #             print(f"Loaded dataset size from {sizes_filename}: {total_size} samples, {num_shards} shards")
-    #             return total_size, num_shards
-    #     except Exception as e:
-    #         print(f"Could not load {sizes_filename}: {e}")
-    
     # 回退到估算
     total_size = num_shards * estimated_sample_per_shard
     print(f"Estimating dataset size: {total_size} samples ({num_shards} shards * {estimated_sample_per_shard} samples/shard)")
@@ -281,192 +267,6 @@ def center_crop_arr(pil_image, image_size):
     return arr[crop_y : crop_y + image_size, crop_x : crop_x + image_size]
 
 
-# MS COCO
-
-
-def center_crop(width, height, img):
-    resample = {'box': Image.BOX, 'lanczos': Image.LANCZOS}['lanczos']
-    crop = np.min(img.shape[:2])
-    img = img[(img.shape[0] - crop) // 2: (img.shape[0] + crop) // 2,
-          (img.shape[1] - crop) // 2: (img.shape[1] + crop) // 2]
-    try:
-        img = Image.fromarray(img, 'RGB')
-    except:
-        img = Image.fromarray(img)
-    img = img.resize((width, height), resample)
-
-    return np.array(img).astype(np.uint8)
-
-
-class MSCOCODatabase(Dataset):
-    def __init__(self, root, annFile, size=None):
-        from pycocotools.coco import COCO
-        self.root = root
-        self.height = self.width = size
-
-        self.coco = COCO(annFile)
-        self.keys = list(sorted(self.coco.imgs.keys()))
-
-    def _load_image(self, key: int):
-        path = self.coco.loadImgs(key)[0]["file_name"]
-        return Image.open(os.path.join(self.root, path)).convert("RGB")
-
-    def _load_target(self, key: int):
-        return self.coco.loadAnns(self.coco.getAnnIds(key))
-
-    def __len__(self):
-        return len(self.keys)
-
-    def __getitem__(self, index):
-        key = self.keys[index]
-        image = self._load_image(key)
-        image = np.array(image).astype(np.uint8)
-        image = center_crop(self.width, self.height, image).astype(np.float32)
-        image = (image / 127.5 - 1.0).astype(np.float32)
-        image = einops.rearrange(image, 'h w c -> c h w')
-
-        anns = self._load_target(key)
-        target = []
-        for ann in anns:
-            target.append(ann['caption'])
-
-        return image, target
-
-
-def get_feature_dir_info(root):
-    files = glob.glob(os.path.join(root, '*.npy'))
-    files_caption = glob.glob(os.path.join(root, '*_*.npy'))
-    num_data = len(files) - len(files_caption)
-    n_captions = {k: 0 for k in range(num_data)}
-    for f in files_caption:
-        name = os.path.split(f)[-1]
-        k1, k2 = os.path.splitext(name)[0].split('_')
-        n_captions[int(k1)] += 1
-    return num_data, n_captions
-
-
-class MSCOCOFeatureDataset(Dataset):
-    # the image features are got through sample
-    def __init__(self, root, need_squeeze=False, full_feature=False, fix_test_order=False):
-        self.root = root
-        self.num_data, self.n_captions = get_feature_dir_info(root)
-        self.need_squeeze = need_squeeze
-        self.full_feature = full_feature
-        self.fix_test_order = fix_test_order
-
-    def __len__(self):
-        return self.num_data
-
-    def __getitem__(self, index):
-        if self.full_feature:
-            z = np.load(os.path.join(self.root, f'{index}.npy'))
-
-            if self.fix_test_order:
-                k = self.n_captions[index] - 1
-            else:
-                k = random.randint(0, self.n_captions[index] - 1)
-
-            test_item = np.load(os.path.join(self.root, f'{index}_{k}.npy'), allow_pickle=True).item()
-            token_embedding = test_item['token_embedding']
-            token_mask = test_item['token_mask']
-            token = test_item['token']
-            caption = test_item['promt']
-            return z, token_embedding, token_mask, token, caption
-        else:
-            z = np.load(os.path.join(self.root, f'{index}.npy'))
-            k = random.randint(0, self.n_captions[index] - 1)
-            c = np.load(os.path.join(self.root, f'{index}_{k}.npy'))
-            if self.need_squeeze:
-                return z, c.squeeze()
-            else:
-                return z, c
-
-
-class JDBFeatureDataset(Dataset):
-    def __init__(self, root, resolution, llm):
-        super().__init__()
-        json_path = os.path.join(root,'img_text_pair.jsonl')
-        self.img_root = os.path.join(root,'imgs')
-        self.feature_root = os.path.join(root,'features')
-        self.resolution = resolution
-        self.llm = llm
-        self.file_list = []
-        with open(json_path, 'r', encoding='utf-8') as file:
-            for line in file:
-                self.file_list.append(json.loads(line)['img_path'])
-
-    def __len__(self):
-        return len(self.file_list)
-    
-    def __getitem__(self, idx):
-        data_item = self.file_list[idx]
-        # Extract filename and replace extension with .npy for all image formats
-        filename = data_item.split('/')[-1]
-        base_name = os.path.splitext(filename)[0]
-        feature_path = os.path.join(self.feature_root, base_name + '.npy')
-        img_path = os.path.join(self.img_root, data_item)
-
-        train_item = np.load(feature_path, allow_pickle=True).item()
-        pil_image = Image.open(img_path)
-        pil_image.load()
-        pil_image = pil_image.convert("RGB")
-
-
-        z = train_item[f'image_latent_{self.resolution}']
-        token_embedding = train_item[f'token_embedding_{self.llm}']
-        token_mask = train_item[f'token_mask_{self.llm}']
-        token = train_item[f'token_{self.llm}']
-        caption = train_item['batch_caption']
-
-        img = center_crop_arr(pil_image, image_size=self.resolution)
-        img = (img / 127.5 - 1.0).astype(np.float32)
-        img = einops.rearrange(img, 'h w c -> c h w')
-
-        # return z, token_embedding, token_mask, token, caption, 0, img, 0, 0
-        return z, token_embedding, token_mask, token, caption, img
-
-
-class JDBFullFeatures(DatasetFactory):  # the moments calculated by Stable Diffusion image encoder & the contexts calculated by clip
-    def __init__(self, train_path, val_path, resolution, llm, cfg=False, p_uncond=None, fix_test_order=False):
-        super().__init__()
-        print('Prepare dataset...')
-        self.resolution = resolution
-
-        self.train = JDBFeatureDataset(train_path, resolution=resolution, llm=llm)
-        self.test = MSCOCOFeatureDataset(os.path.join(val_path, 'val'), full_feature=True, fix_test_order=fix_test_order)
-        assert len(self.test) == 40504
-        
-        print('Prepare dataset ok')
-
-        # self.empty_context = np.load(os.path.join(val_path, 'empty_context.npy'), allow_pickle=True).item()
-
-        assert not cfg
-
-        # text embedding extracted by clip
-        self.prompts, self.token_embedding, self.token_mask, self.token = [], [], [], []
-        for f in sorted(os.listdir(os.path.join(val_path, 'run_vis')), key=lambda x: int(x.split('.')[0])):
-            vis_item = np.load(os.path.join(val_path, 'run_vis', f), allow_pickle=True).item()
-            self.prompts.append(vis_item['promt'])
-            self.token_embedding.append(vis_item['token_embedding'])
-            self.token_mask.append(vis_item['token_mask'])
-            self.token.append(vis_item['token'])
-        self.token_embedding = np.array(self.token_embedding)
-        self.token_mask = np.array(self.token_mask)
-        self.token = np.array(self.token)
-
-    @property
-    def data_shape(self):
-        if self.resolution==512:
-            return 4, 64, 64
-        else:
-            return 4, 32, 32
-
-    @property
-    def fid_stat(self):
-        # 如果通过命令行或配置传入了 fid_stat_path，则使用它；否则使用默认路径
-        if self.fid_stat_path:
-            return self.fid_stat_path
-        return f'/storage/v-jinpewang/lab_folder/qisheng_data/assets/fid_stats/fid_stats_mscoco256_val.npz'
 
 class TextImageDataset(Dataset):
     def __init__(self, root, resolution, llm, feature_dir='features_2D', test_mode=False):
@@ -831,6 +631,7 @@ class StrictProportionalBatchSampler(IterableDataset):
         super().__init__()
         if len(weights) != len(pipelines):
             raise ValueError(f"权重数量 ({len(weights)}) 必须与 pipeline 数量 ({len(pipelines)}) 一致")
+
         
         self.pipelines = pipelines
         self.weights = weights
@@ -922,7 +723,9 @@ class WebDatasetDataset(IterableDataset):
                  num_workers=None,  # 新增：DataLoader 的 num_workers，用于正确计算 with_epoch
                  batch_size=None,  # 新增：batch_size，用于正确计算 with_epoch
                  sampling_weights=None,  # 新增：采样权重，用于指定不同路径模式的采样比例
-                 force_simple_mode=False):  # 新增：强制使用简单模式（合并所有路径，不使用比例采样）
+                 force_simple_mode=False,  # 新增：强制使用简单模式（合并所有路径，不使用比例采样）
+                 enable_shuffle=True,  # 新增：是否启用 shuffle（测试集可设为 False）
+                 partial=False):  # 新增：batch 时是否允许不完整的 batch（测试集可设为 True）
         """
         Args:
             tar_pattern: webdataset 的 tar 文件路径模式，支持 braceexpand
@@ -956,6 +759,12 @@ class WebDatasetDataset(IterableDataset):
             force_simple_mode: 强制使用简单模式（默认False）
                 当为 True 时，即使有多个路径模式也将它们合并成一个列表，不使用比例采样
                 适用于测试集等不需要特殊采样策略的场景
+            enable_shuffle: 是否启用 shuffle（默认True）
+                当为 False 时，数据将按顺序读取，不进行 shuffle
+                适用于测试集等需要确定性顺序的场景
+            partial: batch 时是否允许不完整的 batch（默认False）
+                当为 True 时，最后一个 batch 可以不足 batch_size
+                适用于测试集等需要处理所有数据的场景
         """
         super().__init__()  # 初始化 IterableDataset
         self.resolution = resolution
@@ -964,6 +773,9 @@ class WebDatasetDataset(IterableDataset):
         self.num_workers = num_workers if num_workers is not None else 1
         self.batch_size = batch_size
         self.sampling_weights = sampling_weights
+        self.enable_shuffle = enable_shuffle
+        self.partial = partial
+        self.resampled = resampled
 
         # 设置设备
         if device is None:
@@ -1004,19 +816,17 @@ class WebDatasetDataset(IterableDataset):
                 # 展开当前模式的 URLs
                 pattern_urls = list(braceexpand.braceexpand(pattern))
                 total_shards += len(pattern_urls)
-                
-                # 节点分配
-                need_nodesplitter = split_data_by_node_flag or is_multi_node_environment()
+
+                urls = pattern_urls
+                # 不要在这里 shuffle！split_by_node/worker 需要所有进程看到相同的顺序
+                # ResampledShards 会在内部处理随机性
+
+                # 判断是否需要 nodesplitter
                 if allow_shared_shards:
-                    urls = pattern_urls
-                    random.shuffle(urls)
                     need_nodesplitter = False
-                elif split_data_by_node_flag:
-                    node_urls = split_data_by_node(pattern_urls, strategy="interleaved")
-                    urls = node_urls if len(node_urls) > 0 else pattern_urls
+                elif split_data_by_node_flag and is_multi_node_environment():
+                    need_nodesplitter = True
                 else:
-                    urls = pattern_urls
-                    random.shuffle(urls)
                     need_nodesplitter = False
                 
                 # 为当前模式创建完整的 pipeline（但不包含 batch）
@@ -1038,24 +848,33 @@ class WebDatasetDataset(IterableDataset):
             self.num_samples = self.num_shards * estimated_samples_per_shard
             
             if self.batch_size is not None:
-                num_batches = math.ceil(self.num_samples / self.batch_size)
-                if self.num_workers > 1:
-                    num_worker_batches = math.ceil(num_batches / self.num_workers)
-                else:
-                    num_worker_batches = num_batches
-                epoch_size = num_worker_batches
-                self.epoch_size = num_worker_batches * self.batch_size
+                # 获取分布式信息
+                _, world_size, _, _ = pytorch_worker_info()
+                # 计算每个 worker 需要处理的 batch 数
+                num_worker_batches = math.ceil(self.total_num_samples / (world_size * self.batch_size * self.num_workers))
+                # 计算当前节点所有 worker 的总 batch 数和总样本数
+                num_batches = num_worker_batches * self.num_workers
+                num_samples = num_batches * self.batch_size
+                # with_epoch 接收的是每个 worker 的 batch 数（因为 pipeline 里已经 batched 了）
+                with_epoch_size = num_worker_batches
+                # 保存元数据供外部访问（类似 demo 的做法）
+                self.num_batches = num_batches
+                self.num_samples = num_samples
             else:
+                # 没有 batch，with_epoch 接收样本数
                 if self.num_workers > 1:
-                    epoch_size = math.ceil(self.num_samples / self.num_workers)
+                    with_epoch_size = math.ceil(self.num_samples / self.num_workers)
                 else:
-                    epoch_size = self.num_samples
-                self.epoch_size = epoch_size
+                    with_epoch_size = self.num_samples
+                self.num_samples = with_epoch_size
             
             # 根据是否提供权重选择合并方式
             if self.sampling_weights is not None:
                 if self.batch_size is not None:
                     # 使用严格比例的批次采样器（batch 在采样器内部完成）
+                    # 确保只有在 resampled=True 时才能使用 StrictProportionalBatchSampler
+                    if not self.resampled:
+                        raise ValueError("StrictProportionalBatchSampler only used in resampled=True")
                     merged_source = StrictProportionalBatchSampler(
                         pipelines, 
                         self.sampling_weights, 
@@ -1077,21 +896,22 @@ class WebDatasetDataset(IterableDataset):
             
             # 只在 batch 还未完成的情况下添加 batch
             if self.batch_size is not None and not batch_already_done:
-                pipeline_stages.append(wds.batched(self.batch_size, partial=False))
+                pipeline_stages.append(wds.batched(self.batch_size, partial=self.partial))
             
             # 组合所有阶段并设置 epoch 大小
             self._pipeline = wds.DataPipeline(*pipeline_stages)
-            self._pipeline = self._pipeline.with_epoch(epoch_size)
+            self._pipeline = self._pipeline.with_epoch(with_epoch_size)
             
             # 打印信息
             sampling_mode = "weighted sampling" if self.sampling_weights is not None else "RoundRobin"
             weights_info = f" ({weights_str})" if self.sampling_weights is not None else ""
             if self.batch_size is not None:
                 print(f"{sampling_mode} mode{weights_info}: {len(patterns)} patterns, {total_shards} total shards, "
-                      f"~{self.num_samples} samples, epoch_size={epoch_size} batches ({epoch_size * self.batch_size} samples)")
+                      f"with_epoch({with_epoch_size} batches per worker), "
+                      f"num_batches={self.num_batches}, num_samples={self.num_samples}")
             else:
                 print(f"{sampling_mode} mode{weights_info}: {len(patterns)} patterns, {total_shards} total shards, "
-                      f"~{self.num_samples} samples, epoch_size={epoch_size} samples")
+                      f"with_epoch({with_epoch_size} samples per worker), num_samples={self.num_samples}")
         else:
             # 单个路径模式或强制简单模式：合并所有路径
             if len(patterns) > 1:
@@ -1106,25 +926,21 @@ class WebDatasetDataset(IterableDataset):
             else:
                 # 单个路径模式：使用原有逻辑
                 all_urls = list(braceexpand.braceexpand(tar_pattern))
+
+            urls = all_urls
+            # split_by_node/worker 需要所有进程看到相同的顺序
+            # ResampledShards 会在内部处理随机性
             
-            # 多节点分配
-            need_nodesplitter = split_data_by_node_flag or is_multi_node_environment()
-            
+            # 判断是否需要 nodesplitter
+            need_nodesplitter = False
             if allow_shared_shards:
-                urls = all_urls
-                random.shuffle(urls)
-                print(f"Shared shards mode: all {len(urls)} shards accessible by all processes")
                 need_nodesplitter = False
-            elif split_data_by_node_flag:
-                node_urls = split_data_by_node(all_urls, strategy="interleaved")
-                if len(node_urls) == 0:
-                    node_urls = all_urls
-                urls = node_urls
-                print(f"Split data by node: using {len(urls)} shards for this node (out of {len(all_urls)} total)")
+                print(f"Shared shards mode: all {len(urls)} shards accessible by all processes")
+            elif split_data_by_node_flag and is_multi_node_environment():
+                need_nodesplitter = True
+                print(f"Multi-process mode: using {len(urls)} shards, will be split by nodesplitter")
             else:
-                urls = all_urls
-                random.shuffle(urls)
-                print(f"Single node mode: using all {len(urls)} shards")
+                print(f"Single process mode: using all {len(urls)} shards")
             
             # 估算数据集大小
             self.num_shards = len(urls)
@@ -1147,39 +963,54 @@ class WebDatasetDataset(IterableDataset):
             
             # 计算 epoch 大小
             if self.batch_size is not None:
-                num_batches = math.ceil(self.num_samples / self.batch_size)
-                if self.num_workers > 1:
-                    num_worker_batches = math.ceil(num_batches / self.num_workers)
-                else:
-                    num_worker_batches = num_batches
-                epoch_size = num_worker_batches
-                self.epoch_size = num_worker_batches * self.batch_size
+                # 获取分布式信息
+                _, world_size, _, _ = pytorch_worker_info()
+                # 计算每个 worker 需要处理的 batch 数
+                num_worker_batches = math.ceil(self.total_num_samples / (world_size * self.batch_size * self.num_workers))
+                # 计算当前节点所有 worker 的总 batch 数和总样本数
+                num_batches = num_worker_batches * self.num_workers
+                num_samples = num_batches * self.batch_size
+                # with_epoch 接收的是每个 worker 的 batch 数（因为 pipeline 里已经 batched 了）
+                with_epoch_size = num_worker_batches
+                # 保存元数据供外部访问（类似 demo 的做法）
+                self.num_batches = num_batches
+                self.num_samples = num_samples
             else:
+                # 没有 batch，with_epoch 接收样本数
                 if self.num_workers > 1:
-                    epoch_size = math.ceil(self.num_samples / self.num_workers)
+                    with_epoch_size = math.ceil(self.num_samples / self.num_workers)
                 else:
-                    epoch_size = self.num_samples
-                self.epoch_size = epoch_size
+                    with_epoch_size = self.num_samples
+                self.num_samples = with_epoch_size 
             
-            # 创建基础 WebDataset
-            if allow_shared_shards:
-                base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler, nodesplitter=nodesplitter_identity, empty_check=False)
-                print(f"Shared shards mode: all processes access all {len(urls)} shards")
-            elif need_nodesplitter and hasattr(wds, "split_by_node"):
-                base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler, nodesplitter=wds.split_by_node, empty_check=False)
-                print(f"Using nodesplitter=wds.split_by_node for multi-process training (world_size > 1)")
+            # 使用 ResampledShards 或 SimpleShardList
+            if resampled:
+                shard_source = wds.ResampledShards(urls)
             else:
-                base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler, empty_check=False)
+                shard_source = wds.SimpleShardList(urls)
             
-            # 构建 pipeline 阶段列表
-            pipeline_stages = [base_pipeline]
+            # 构建 pipeline 阶段列表（在 shard 级别切分）
+            pipeline_stages = [shard_source]
+            
+            # 在 shard 级别做切分（总是显式切分，方案2）
+            if not allow_shared_shards and need_nodesplitter and hasattr(wds, "split_by_node"):
+                pipeline_stages.append(wds.split_by_node)
+                print(f"Using wds.split_by_node for multi-process training")
             
             if self.num_workers > 1:
                 pipeline_stages.append(wds.split_by_worker)
                 print(f"Added wds.split_by_worker for {self.num_workers} workers")
             
-            pipeline_stages.extend([
-                wds.shuffle(shuffle_buffer, handler=handler),
+            # 然后才展开样本
+            pipeline_stages.append(wds.tarfile_to_samples(handler=handler))
+            
+            # 后续处理
+            processing_stages = []
+            # 条件性添加 shuffle
+            if self.enable_shuffle:
+                processing_stages.append(wds.shuffle(shuffle_buffer, handler=handler))
+            
+            processing_stages.extend([
                 wds.decode("pil", handler=handler),
                 wds.map(handle_reconstruction_task, handler=handler),
                 wds.to_tuple("in.png;in.jpg", "out.png;out.jpg", handler=handler),
@@ -1190,49 +1021,62 @@ class WebDatasetDataset(IterableDataset):
                 wds.map(self._unpack_input_tuple),
             ])
             
+            pipeline_stages.extend(processing_stages)
+            
             if self.batch_size is not None:
-                pipeline_stages.append(wds.batched(self.batch_size, partial=False))
+                pipeline_stages.append(wds.batched(self.batch_size, partial=self.partial))
             
             self._pipeline = wds.DataPipeline(*pipeline_stages)
-            self._pipeline = self._pipeline.with_epoch(epoch_size)
+            self._pipeline = self._pipeline.with_epoch(with_epoch_size)
             
             if self.batch_size is not None:
                 print(f"WebDataset initialized: {self.num_shards} shards for this node, "
-                      f"estimated {self.num_samples} total samples in dataset, "
-                      f"epoch size per worker: {epoch_size} batches ({epoch_size * self.batch_size} samples, num_workers={self.num_workers}, batch_size={self.batch_size})")
+                      f"with_epoch({with_epoch_size} batches per worker), "
+                      f"num_batches={self.num_batches}, num_samples={self.num_samples} "
+                      f"(num_workers={self.num_workers}, batch_size={self.batch_size})")
             else:
                 print(f"WebDataset initialized: {self.num_shards} shards for this node, "
-                      f"estimated {self.num_samples} total samples in dataset, "
-                      f"epoch size per worker: {epoch_size} samples (num_workers={self.num_workers})")
+                      f"with_epoch({with_epoch_size} samples per worker), "
+                      f"num_samples={self.num_samples} (num_workers={self.num_workers})")
     
     def _create_single_pattern_pipeline(self, urls, shuffle_buffer, resampled, handler,
                                         need_nodesplitter, allow_shared_shards):
         """为单个路径模式创建 pipeline（不包含 batch）"""
-        # 创建基础 WebDataset
-        if allow_shared_shards:
-            base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler,
-                                         nodesplitter=nodesplitter_identity, empty_check=False)
-        elif need_nodesplitter and hasattr(wds, "split_by_node"):
-            base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler,
-                                         nodesplitter=wds.split_by_node, empty_check=False)
+        # 使用 ResampledShards 或 SimpleShardList（在 shard 级别操作）
+        if resampled:
+            shard_source = wds.ResampledShards(urls)  # 无限抽样（训练常用）
         else:
-            base_pipeline = wds.WebDataset(urls, resampled=resampled, handler=handler,
-                                         empty_check=False)
+            shard_source = wds.SimpleShardList(urls)  # 有限遍历（测试用）
         
-        # 构建 pipeline 阶段（不包含 batch）
-        pipeline_stages = [base_pipeline]
+        # 构建 pipeline 阶段（在 shard 级别就切分）
+        pipeline_stages = [shard_source]
+        
+        # 在 shard 级别做切分（避免重复 I/O）
+        # 总是显式切分（方案2：更保守，I/O 更可控）
+        if not allow_shared_shards and need_nodesplitter and hasattr(wds, "split_by_node"):
+            pipeline_stages.append(wds.split_by_node)
         
         if self.num_workers > 1:
             pipeline_stages.append(wds.split_by_worker)
         
-        pipeline_stages.extend([
-            wds.shuffle(shuffle_buffer, handler=handler),
+        # 然后才展开样本
+        pipeline_stages.append(wds.tarfile_to_samples(handler=handler))
+        
+        # 后续处理
+        processing_stages = []
+        # 条件性添加 shuffle
+        if self.enable_shuffle:
+            processing_stages.append(wds.shuffle(shuffle_buffer, handler=handler))
+        
+        processing_stages.extend([
             wds.decode("pil", handler=handler),
             wds.map(handle_reconstruction_task, handler=handler),
             wds.to_tuple("in.png;in.jpg", "out.png;out.jpg", handler=handler),
             wds.map_tuple(self._preprocess_input, self._preprocess_output),
             wds.map(self._unpack_input_tuple),
         ])
+        
+        pipeline_stages.extend(processing_stages)
         
         return wds.DataPipeline(*pipeline_stages)
     
@@ -1305,10 +1149,10 @@ class WebDatasetDataset(IterableDataset):
     # def __len__(self):
     #     """
     #     返回每个周期的样本数（用于 DataLoader 进度条）
-    #     注意：这返回的是 epoch_size，不是总数据集大小
+    #     注意：这返回的是 num_samples，不是总数据集大小
     #     因为 WebDataset 使用 with_epoch() 限制每个周期的长度
     #     """
-    #     return self.epoch_size
+    #     return self.num_samples
     
     def set_vl_chat_processor(self, vl_chat_processor):
         """设置 vl_chat_processor（用于在创建 processor 后更新数据集）"""
@@ -1337,7 +1181,7 @@ class OnlineFeatures(DatasetFactory):
                  task='visual_instruction', cfg=False, resolution=256, val_split_ratio=0.01,
                  shuffle_buffer=300, resampled=True, split_data_by_node=True,estimated_samples_per_shard=1000,
                  vl_chat_processor=None, device=None, fid_stat_path=None,
-                 num_workers=None, batch_size=None, sampling_weights=None):
+                 num_workers=None, batch_size=None, test_batch_size=None, test_num_workers=None, sampling_weights=None):
         """
         Args:
             train_image_root: 文件系统模式的训练数据根目录（包含 input/output 子目录）
@@ -1364,7 +1208,11 @@ class OnlineFeatures(DatasetFactory):
             num_workers: DataLoader 的 num_workers（可选）
                 如果提供，将用于正确计算每个 worker 的 epoch 大小
             batch_size: batch_size（可选）
-                如果提供，将用于更精确地计算 epoch 大小
+                如果提供，将用于更精确地计算 epoch 大小（训练集使用）
+            test_batch_size: 测试集的 batch_size（可选）
+                如果提供，测试集将使用此值；否则使用 batch_size
+            test_num_workers: 测试集的 num_workers（可选）
+                如果提供，测试集将使用此值；否则使用 num_workers
             sampling_weights: 采样权重列表（可选）
                 用于指定多个路径模式的采样比例。例如：[0.7, 0.3] 表示第一个模式占70%，第二个占30%
                 如果为 None 且存在多个模式，则使用均匀采样（RoundRobin，50:50）
@@ -1402,19 +1250,25 @@ class OnlineFeatures(DatasetFactory):
                 batch_size=batch_size,  # 传入mini_batch_size
                 sampling_weights=sampling_weights
             )
+            # 测试集使用 test_batch_size（如果提供），否则使用 batch_size
+            test_batch_size_to_use = test_batch_size if test_batch_size is not None else batch_size
+            # 测试集使用 test_num_workers（如果提供），否则使用 num_workers
+            test_num_workers_to_use = test_num_workers if test_num_workers is not None else num_workers
             self.test = WebDatasetDataset(
                 tar_pattern=test_tar_pattern,
                 resolution=resolution,
                 shuffle_buffer=100,  # 测试集使用最小shuffle，保持基本顺序以确保可重复性
-                resampled=True,  # 当 allow_shared_shards=True 时，必须使用 resampled=True
+                resampled=False,  # 当 allow_shared_shards=True 时，必须使用 resampled=True
                 split_data_by_node_flag=split_data_by_node,
-                allow_shared_shards=True,  # 允许多个进程共享shard（当shard数量少于进程数时）
+                allow_shared_shards=False,  # 允许多个进程共享shard（当shard数量少于进程数时）
                 estimated_samples_per_shard=estimated_samples_per_shard,
                 vl_chat_processor=vl_chat_processor,
                 device=device,
-                num_workers=num_workers,
-                batch_size=batch_size,
-                force_simple_mode=True  # 测试集强制简单模式，合并所有路径，与demo版本一致
+                num_workers=test_num_workers_to_use,  # 使用 test_num_workers（如果提供）
+                batch_size=test_batch_size_to_use,  # 使用 test_batch_size（如果提供）
+                force_simple_mode=True,  # 测试集强制简单模式，合并所有路径，与demo版本一致
+                enable_shuffle=False,  # 测试集不 shuffle，保持数据顺序
+                partial=True  # 测试集允许不完整的 batch，确保所有数据都被处理
             )
         elif train_image_root is not None:
             # 使用文件系统模式（原有逻辑）
@@ -1657,9 +1511,7 @@ class OnlineFeatures(DatasetFactory):
         return f'/storage/v-jinpewang/lab_folder/qisheng_data/assets/fid_stats/fid_stats_mscoco256_val.npz'
 
 def get_dataset(name, **kwargs):
-    if name == 'JDB_demo_features':
-        return JDBFullFeatures(**kwargs)
-    elif name == 'textimage_features':
+    if name == 'textimage_features':
         return TextImageFeatures(**kwargs)
     elif name == 'online_features':
         return OnlineFeatures(**kwargs)

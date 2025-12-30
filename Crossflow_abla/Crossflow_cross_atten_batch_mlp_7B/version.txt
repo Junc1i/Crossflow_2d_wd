@@ -1,0 +1,2 @@
+janus 7B + 两次mlp
+已更新wds
