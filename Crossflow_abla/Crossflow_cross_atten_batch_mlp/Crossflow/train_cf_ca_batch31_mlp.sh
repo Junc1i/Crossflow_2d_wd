@@ -81,6 +81,6 @@ accelerate launch \
     --betas=0.9,0.9 \
     --adamw_impl=AdamW \
     --use_cross_attention=true \
-    --wandb_project=crossflow_2d_mixed_ca_batch3-1-mlp-1b \
+    --wandb_project=crossflow_2d_mixed_ca_batch3-1-mlp-1b-new-wds \
     --wandb_mode=online \
     --num_workers=16

@@ -64,7 +64,7 @@ def train(config):
         torch.backends.cudnn.deterministic = False
 
     mp.set_start_method('spawn')
-    accelerator = accelerate.Accelerator(gradient_accumulation_steps=1)
+    accelerator = accelerate.Accelerator()
     device = accelerator.device
     accelerate.utils.set_seed(config.seed, device_specific=True)
     logging.info(f'Process {accelerator.process_index} using device: {device}')
@@ -108,6 +108,7 @@ def train(config):
     # 定义 num_workers（可以从配置中读取，或使用默认值）
     gpu_model = torch.cuda.get_device_name(torch.cuda.current_device())
     num_workers = getattr(config, 'num_workers', 8)
+    test_num_workers = 3
     
     # 传递参数到 dataset（包括 fid_stat_path, num_workers, batch_size）
     dataset_kwargs = dict(config.dataset)
@@ -116,7 +117,9 @@ def train(config):
     
     # 传递 num_workers 和 batch_size 给数据集
     dataset_kwargs['num_workers'] = num_workers
-    dataset_kwargs['batch_size'] = mini_batch_size  # 每个进程的 batch_size
+    dataset_kwargs['batch_size'] = mini_batch_size  # 每个进程的 batch_size（用于训练集）
+    dataset_kwargs['test_batch_size'] = config.sample.mini_batch_size  # 测试集使用 config.sample.mini_batch_size
+    dataset_kwargs['test_num_workers'] = test_num_workers  # 测试集固定使用 2 个 worker
     dataset = get_dataset(**dataset_kwargs)
 
     # 提前加载模型，以便在创建 DataLoader 之前设置 processor
@@ -185,8 +188,8 @@ def train(config):
             test_dataset,
             batch_size=None,  # batch_size 已经在 pipeline 中通过 wds.batched() 处理
             shuffle=False,
-            num_workers=4,  # 可以使用多个 worker 加速数据加载
-            pin_memory=True,  # 使用 pin_memory 加速 CPU 到 GPU 的传输（数据在 CPU 上）
+            num_workers=test_num_workers,  
+            pin_memory=True,
             persistent_workers=True if num_workers > 0 else False,  # num_workers > 0 时可以使用 persistent_workers
         )
     else:
@@ -202,8 +205,25 @@ def train(config):
 
 
     train_state = utils.initialize_train_state(config, device)
-    nnet, nnet_ema, optimizer, train_dataset_loader, test_dataset_loader = accelerator.prepare(
-        train_state.nnet, train_state.nnet_ema, train_state.optimizer, train_dataset_loader, test_dataset_loader)
+    # WebDataset 已经在内部通过 split_by_node/split_by_worker 处理了分布式切分
+    # 如果再用 accelerator.prepare() 会造成双重切分，导致每个 rank 只看到 1/world_size 的数据
+    if is_webdataset:
+        # WebDataset: 只 prepare 模型和优化器，不 prepare dataloader
+        nnet, nnet_ema, optimizer = accelerator.prepare(
+            train_state.nnet, train_state.nnet_ema, train_state.optimizer
+        )
+        
+        # test_dataset_loader 同样需要检查
+        if not is_test_webdataset:
+            # 如果 test 是普通 Dataset，需要 prepare
+            test_dataset_loader = accelerator.prepare(test_dataset_loader)
+        # 如果 test 也是 WebDataset，则不需要 prepare
+    else:
+        # 普通 Dataset 需要 accelerator.prepare 来处理分布式
+        nnet, nnet_ema, optimizer, train_dataset_loader, test_dataset_loader = accelerator.prepare(
+            train_state.nnet, train_state.nnet_ema, train_state.optimizer, 
+            train_dataset_loader, test_dataset_loader
+        )
     lr_scheduler = train_state.lr_scheduler
     # 使用 resume_ckpt_root 进行 resume，保存时仍然使用 ckpt_root
     # 支持两种格式：
@@ -352,20 +372,19 @@ def train(config):
             output_tokens=576,  # 返回前77个token: [batch_size, 77, 2048], [batch_size, 77]
             accelerator=accelerator,
             cached_input_ids=cached_training_input_ids  # 传入预编码的input_ids，跳过tokenizer.encode
-        )
-        with accelerator.accumulate(nnet):    
-            loss, loss_dict = _flow_mathcing_model(_z, nnet, loss_coeffs=config.loss_coeffs, cond=_batch_con, con_mask=_batch_mask, batch_img_clip=_batch_output_img, \
-            nnet_style=config.nnet.name, text_token=None, model_config=config.nnet.model_args, all_config=config, training_step=train_state.step, image_latent=_input_image_latent)
+        )  
+        loss, loss_dict = _flow_mathcing_model(_z, nnet, loss_coeffs=config.loss_coeffs, cond=_batch_con, con_mask=_batch_mask, batch_img_clip=_batch_output_img, \
+        nnet_style=config.nnet.name, text_token=None, model_config=config.nnet.model_args, all_config=config, training_step=train_state.step, image_latent=_input_image_latent)
 
 
-            _metrics['loss'] = accelerator.gather(loss.detach()).mean()
-            for key in loss_dict.keys():
-                _metrics[key] = accelerator.gather(loss_dict[key].detach()).mean()
-            accelerator.backward(loss.mean())
-            optimizer.step()
-            lr_scheduler.step()
-            train_state.ema_update(config.get('ema_rate', 0.9999))
-            train_state.step += 1
+        _metrics['loss'] = accelerator.gather(loss.detach()).mean()
+        for key in loss_dict.keys():
+            _metrics[key] = accelerator.gather(loss_dict[key].detach()).mean()
+        accelerator.backward(loss.mean())
+        optimizer.step()
+        lr_scheduler.step()
+        train_state.ema_update(config.get('ema_rate', 0.9999))
+        train_state.step += 1
         return dict(lr=train_state.optimizer.param_groups[0]['lr'], **_metrics)
 
     def ode_fm_solver_sample(nnet_ema, _n_samples, _sample_steps, context=None, caption=None, testbatch_img_blurred=None, two_stage_generation=-1, token_mask=None, return_clipScore=False, ClipSocre_model=None, image_latent=None):
@@ -396,9 +415,9 @@ def train(config):
         # 确保n_samples不超过测试数据集的大小
         # WebDatasetDataset 不支持 len()，需要特殊处理
         if is_test_webdataset:
-            # WebDataset 模式：使用 epoch_size 属性（如果存在）
-            if hasattr(test_dataset, 'epoch_size'):
-                test_dataset_size = test_dataset.epoch_size
+            # WebDataset 模式：使用 num_samples 属性（如果存在）
+            if hasattr(test_dataset, 'num_samples'):
+                test_dataset_size = test_dataset.num_samples
                 if n_samples > test_dataset_size:
                     logging.warning(f"n_samples ({n_samples}) 超过测试数据集大小 ({test_dataset_size})，将使用测试数据集大小")
                     n_samples = test_dataset_size

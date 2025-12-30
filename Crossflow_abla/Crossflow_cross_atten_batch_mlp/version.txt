@@ -1,0 +1,6 @@
+已更新wds处理，避免二次切分。两次mlp
+# 应用适配层 [B, 576, 2048] → [B, 576, 768]
+adapted_cond = self.adapter(x)
+adapted_cond = adapted_cond.transpose(1, 2) # [B, 576, 768] -> [B, 768, 576]
+adapted_cond = self.token_compressor(adapted_cond) # [B, 768, 77]
+adapted_cond = adapted_cond.transpose(1, 2) # [B, 768, 77] -> [B, 77, 768]
