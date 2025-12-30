@@ -374,7 +374,8 @@ def train(config):
             cached_input_ids=cached_training_input_ids  # 传入预编码的input_ids，跳过tokenizer.encode
         )
         loss, loss_dict = _flow_mathcing_model(_z, nnet, loss_coeffs=config.loss_coeffs, cond=_batch_con, con_mask=_batch_mask, batch_img_clip=_batch_output_img, \
-        nnet_style=config.nnet.name, text_token=None, model_config=config.nnet.model_args, all_config=config, training_step=train_state.step, image_latent=_input_image_latent)
+            nnet_style=config.nnet.name, text_token=None, model_config=config.nnet.model_args, all_config=config, training_step=train_state.step, image_latent=_input_image_latent, \
+            input_visual_tokens=_batch_con, input_visual_mask=_batch_mask)
 
         _metrics['loss'] = accelerator.gather(loss.detach()).mean()
         for key in loss_dict.keys():
