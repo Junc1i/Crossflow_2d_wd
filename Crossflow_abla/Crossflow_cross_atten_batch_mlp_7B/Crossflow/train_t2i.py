@@ -250,7 +250,7 @@ def train(config):
     # vl_gpt = vl_gpt.half().eval().to(device)
 
     # 修改为：
-    local_gpu = accelerator.local_process_index
+    local_gpu = accelerator.process_index
     
     vl_gpt: MultiModalityCausalLM = AutoModelForCausalLM.from_pretrained(
         model_path, 
